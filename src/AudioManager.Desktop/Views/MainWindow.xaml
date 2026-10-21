@@ -189,9 +189,10 @@
                             </Border>
                         </StackPanel>
                         <TextBlock Text="{Binding SelectedDevice.Name}" Style="{StaticResource SecondaryTextStyle}" />
+                        <TextBlock Text="{Binding MasterControlStatus}" Foreground="{StaticResource WarningBrush}" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider Grid.Column="2" Style="{StaticResource VolumeSliderStyle}" Margin="0,0,12,0"
-                            Value="{Binding MasterVolume}" AutomationProperties.Name="系统主音量" />
+                            Value="{Binding MasterVolume}" IsEnabled="{Binding CanControlMaster}" AutomationProperties.Name="系统主音量" />
                     <TextBlock Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right" FontSize="14"
                                Text="{Binding MasterVolume, StringFormat={}{0:0}%}" />
                 </Grid>
@@ -266,6 +267,7 @@
                                             <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                         </DockPanel>
                                         <TextBlock Text="{Binding Detail}" Style="{StaticResource SecondaryTextStyle}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Detail}" />
+                                        <TextBlock Text="{Binding ControlStatus}" FontSize="11" Foreground="{StaticResource WarningBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding ControlStatus}" />
                                     </StackPanel>
 
                                     <Button Grid.Column="2" Style="{StaticResource IconButtonStyle}" HorizontalAlignment="Left"
@@ -300,7 +302,7 @@
                                     </Button>
 
                                     <Slider Grid.Column="3" Style="{StaticResource VolumeSliderStyle}" Margin="0,0,12,0"
-                                            Value="{Binding Volume}" AutomationProperties.Name="{Binding DisplayName}" />
+                                            Value="{Binding Volume}" IsEnabled="{Binding CanControl}" AutomationProperties.Name="{Binding DisplayName}" />
                                     <TextBlock Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Right"
                                                Text="{Binding Volume, StringFormat={}{0:0}%}" />
                                 </Grid>
@@ -371,6 +373,7 @@
         </Expander>
         <DockPanel Grid.Row="5" Margin="0,10,0,0">
             <Button DockPanel.Dock="Right" Content="退出程序" Padding="12,4" Click="OnExitClicked" />
+            <Button DockPanel.Dock="Left" Content="方案与自动恢复" Padding="12,4" Margin="0,0,12,0" Click="OnConfigurationClicked" />
             <TextBlock x:Name="LifetimeText" Text="" VerticalAlignment="Center" TextWrapping="Wrap"
                        Style="{StaticResource SecondaryTextStyle}" Margin="0,0,12,0" />
         </DockPanel>

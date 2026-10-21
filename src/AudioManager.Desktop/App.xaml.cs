@@ -6,6 +6,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Windows;
 using System.ComponentModel;
+using AudioManager.Core.Interfaces;
+using AudioManager.Core.Services;
+using System.IO;
 
 namespace AudioManager.Desktop;
 
@@ -24,6 +27,15 @@ public partial class App : Application
         services = new ServiceCollection()
             .AddLogging(logging => logging.AddDebug())
             .AddWindowsAudio()
+            .AddSingleton<WindowsAudioController>()
+            .AddSingleton(provider => new AudioWriteGuard(provider.GetRequiredService<WindowsAudioController>()))
+            .AddSingleton<IAudioController>(provider => provider.GetRequiredService<AudioWriteGuard>())
+            .AddSingleton<IConfigurationStore>(_ => new JsonConfigurationStore(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixDeck", "settings.json")))
+            .AddSingleton<ILoginStartup>(_ => new WindowsLoginStartup(Path.ChangeExtension(typeof(App).Assembly.Location, ".exe")))
+            .AddSingleton<AudioConfigurationService>()
+            .AddSingleton<IConfigurationDialogs, ConfigurationDialogs>()
+            .AddSingleton<ConfigurationViewModel>()
             .AddSingleton(TimeProvider.System)
             .AddSingleton<AppIconProvider>()
             .AddSingleton<OperationLog>()
@@ -49,7 +61,15 @@ public partial class App : Application
         mainView.SetTrayAvailable(lifetime.HasTray);
         mainView.ExitRequested += OnExitRequested;
         SessionEnding += OnSessionEnding;
+        if (e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase) && lifetime.HasTray)
+            MainWindow.Loaded += HideAfterLoginStartup;
         MainWindow.Show();
+    }
+
+    private void HideAfterLoginStartup(object sender, RoutedEventArgs e)
+    {
+        MainWindow.Loaded -= HideAfterLoginStartup;
+        lifetime?.TryHideWindow();
     }
 
     private void ShowMainWindow()
