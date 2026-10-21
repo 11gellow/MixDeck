@@ -1,6 +1,6 @@
 # 项目架构
 
-> 基线日期：2026-10-20；实现事实更新：2026-10-21。来源：用户提供的《Windows Audio Manager 项目开发规划》（规划 V1.0）。基线职责与约束保持不变；四项目、音频控制核心、实时状态模块、事件同步的 WPF 主界面及托盘已落地，规则与配置仍为规划。
+> 基线日期：2026-10-20；实现事实更新：2026-10-21。来源：用户提供的《Windows Audio Manager 项目开发规划》（规划 V1.0）。基线职责与约束保持不变；四项目、音频核心、实时状态、WPF/托盘、配置与恢复规则均已实现，真实重启登录验收待用户反馈。
 
 ## 整体设计与模块
 
@@ -13,11 +13,11 @@
 | `AudioManager.Windows` | Windows 音频 API、设备操作、会话枚举、事件监听和系统相关功能 |
 | `AudioManager.Tests` | 规则匹配、配置读写、恢复策略单元测试；具备环境时执行系统集成测试 |
 
-已落地的引用为 Desktop → Core/Windows、Windows → Core、Tests → Core/Windows/Desktop（2026-10-21 为 ViewModel 测试新增 Desktop 引用并启用 WPF）；Core 不引用 Desktop、Windows、WPF 或 NAudio。Desktop 的 App 启动入口通过 `AddWindowsAudio` 及 ViewModel/窗口注册组合模块，由容器创建主窗口，退出时释放容器；ViewModel 只依赖 Core 的 `IAudioStateMonitor`（读取实时状态与通知）和 `IAudioController`（写入），不直接调用底层音频 API。当前没有业务规则，后续仍通过 Core 抽象访问能力。
+已落地的引用为 Desktop → Core/Windows、Windows → Core、Tests → Core/Windows/Desktop；Core 不引用 Desktop、Windows、WPF 或 NAudio。App 通过 DI 组合音频、配置、窗口和生命周期；主 ViewModel 使用 `IAudioStateMonitor` 读取、`IAudioController` 写入，配置规则通过 Core 服务执行，不直接调用底层音频 API。阶段 4 未新增 NuGet 包或项目引用。
 
 ## 当前目录与规划目录
 
-当前根目录为 `MixDeck/`，已创建解决方案、SDK 配置、README、`.gitignore`、管理/验收文档，以及规划中的四个项目。工程名沿用 `AudioManager`，根目录未重命名；没有初始化 Git。`global.json` 指定 SDK `10.0.204`，采用 `latestPatch` 且禁用预览版；构建入口为 `dotnet build AudioManager.sln --configuration Debug --nologo`。
+当前根目录为 `MixDeck/`，已创建解决方案、SDK 配置、README、`.gitignore`、管理/验收文档，以及规划中的四个项目。工程名沿用 `AudioManager`，根目录未重命名；当前已有 Git 仓库及提交，main 跟踪 origin/main，本轮未初始化或提交。`global.json` 指定 SDK `10.0.204`，采用 `latestPatch` 且禁用预览版；构建入口为 `dotnet build AudioManager.sln --configuration Debug --nologo`。
 
 Core 为 `net10.0`，现有 `Models/` 中的音频快照、实例键、音量边界与异常类型，`Interfaces/IAudioController.cs`、`Interfaces/IAudioSessionMonitor.cs` 以及 `Events/AudioSessionCreated.cs`。其余项目为 `net10.0-windows`；Desktop 使用 WPF，Tests 使用 xUnit。Windows 中的 `WindowsAudioController` 负责验证、错误/日志与调度，`NAudioBackend` 负责设备、主音量、会话查询和控制；`AudioSessions/SessionSnapshotReader` 负责元数据降级，`Interop/AudioThread` 负责串行执行和 COM 初始化生命周期。`WindowsAudioSessionMonitor` 与 `AudioSessions/NAudioSessionSource` 负责 S2-01 的长期创建监听，由 `AddWindowsAudio` 注册为独立单例；Desktop 不使用该接口，而是使用阶段 2 的 `IAudioStateMonitor`。
 
@@ -79,7 +79,7 @@ AudioManager/                  # 原规划名称，当前实际目录为 MixDeck
 
 ### 应用身份与多会话
 
-区分会话运行时实例标识、应用稳定标识、进程信息和输出设备；不能仅以 PID 作为持久化配置唯一键。初步以程序路径、会话标识、设备标识等信息建立匹配机制，处理同一应用的多个会话、应用退出、会话重建及设备变化。具体稳定键组成、多会话聚合或逐会话应用规则、跨设备匹配策略待确认。
+区分运行时实例标识、稳定应用标识、进程和输出设备；不能以 PID 持久化匹配。2026-10-21 用户确认按完整程序路径匹配、同程序多会话统一目标：`AudioIdentityMatcher` 用路径大小写不敏感比较，系统声音用专门身份，再按原端点 ID 限定设备。不持久化 PID/运行时会话键，也不猜测跨路径、跨设备或同名程序匹配。相同设备同程序的多会话值冲突时拒绝保存并要求统一；路径不可读的会话跳过并报告。
 
 阶段 1 的运行时控制使用 `AudioSessionKey(DeviceId, InstanceId)` 精确定位；不按 PID 合并会话。返回会话标识、PID、进程名称/路径、状态和音量；可选元数据失败通过 Issues/日志反馈，仍保留可控制会话。该运行时键不作为持久化身份；阶段 4 的匹配规划不变。
 
@@ -96,11 +96,11 @@ AudioManager/                  # 原规划名称，当前实际目录为 MixDeck
 7. 保留尚未匹配的规则。
 8. 新会话出现后继续匹配与恢复。
 
-设备切换、连接断开或控制接口失效后，重新枚举并重建相应监听；会话退出后释放相关资源。规则与手动操作的优先级、启停行为和冲突处理细节尚待确认。
+设备切换、连接断开或控制接口失效后，重新枚举并重建监听；会话退出释放资源。用户确认启用后以当前方案为准，外部偏离被恢复；停用后不再写入。实时受管控件禁用并提示在规则表改目标；目标编辑不修改原始快照。手动恢复原始快照前须停用自动规则，避免两种目标冲突。
 
 ### 状态同步与事件处理
 
-变化来源包括本软件操作、Windows 音量混合器操作、其他应用或系统操作、配置恢复以及设备和会话变化。控制链为“Core 的 IAudioController → WindowsAudioController → MTA 队列 → NAudioBackend → 系统音频接口”，返回托管快照，写入后回读；不返回 COM 对象。Desktop 的 ViewModel 只用该接口写入；滑块中间值合并，回读只在无后续待写值时更新界面。读取链为“IAudioStateMonitor.StartAsync → ReadChangesAsync（单消费者，在 UI 线程上下文中逐条处理）→ 按 Revision 应用完整快照”，不轮询；正在写入的值不被快照覆盖，本软件写入的延迟回传（Origin=Self）在写入后 1 秒内若与最后写入值不同则忽略，Origin=External 的快照始终应用并在界面标记。默认设备变化时界面自动跟随，除非用户已手动选择其他设备。“刷新”运行中调用 `RefreshAsync` 重试失效监听，未运行时重新 `StartAsync`。隐藏到托盘不停止读取；显式退出时 ViewModel 先取消读取，容器随后释放监听。规则待阶段 4。
+变化来源包括本软件操作、Windows 音量混合器操作、其他应用或系统操作、配置恢复以及设备和会话变化。Desktop 控制链为“IAudioController → AudioWriteGuard → WindowsAudioController → MTA 队列 → NAudioBackend → 系统音频接口”，写入回读，不返回 COM 对象。滑块中间值合并，回读只在无后续待写值时更新界面。读取链为“IAudioStateMonitor.StartAsync → ReadChangesAsync（UI 上下文唯一消费者）→ 按 Revision 应用快照”，并将事件转交 Core 配置服务，不轮询。未受管项目保留 1 秒 Self 回传过滤；受管项目应用真实监听值并禁用手动滑块，恢复由规则服务回读确认。External 在界面标记；默认设备变化自动跟随，除非用户已手动选其他设备。刷新重新枚举/重试监听并清除暂时的写入限制；隐藏托盘不停止读取，显式退出取消读取后释放容器。
 
 当前控制器的按需操作在专用 MTA 线程执行；每次重新获取并释放 NAudio 对象。尚未执行的请求可取消，已开始的系统调用不强行中断；关闭时排空已接受操作，释放 COM 初始化并结束线程。错误保留操作、分类、原始异常与 HRESULT，整体失败记录 Error、单项不可读记录 Warning。
 
@@ -116,7 +116,7 @@ S2-01 的监听器使用独立 MTA 队列，按设备保留 `MMDevice`/manager�
 
 `ReadChangesAsync` 提供单消费者队列，包含类型、来源、上下文、更新后快照及必要错误信息；取消读取不停止后台，停止前已入队项仍能读取，Dispose 关闭队列。消费者代码在本机回调/工作队列之外执行。非致命信息读取错误通过日志及 ReadFailure 输出；可选元数据失败不触发整个端点重建。消费者需及时消费并在不用时 Stop/Dispose，长时积压与资源预算仍待 S6-08。
 
-PropertyChanged 可能随滑块写入高频产生，当前不触发全设备扫描；设备重命名等元信息可用 Refresh 更新。Refresh 重新读取设备清单并重试缺失监听，不重建或重新抓取健康端点全部会话音量。旧 `IAudioSessionMonitor` 保持创建通知兼容能力；Desktop 已在 S3-09 启动完整 `IAudioStateMonitor` 并在 UI 上下文消费，S3-08 已提供后台托盘；保存恢复仍待阶段 4。此前“Desktop 尚未启动监听”的描述已按代码及实机证据纠正，未改变原规划。
+PropertyChanged 可能随滑块写入高频产生，当前不触发全设备扫描；设备重命名等元信息可用 Refresh 更新。Refresh 重新读取设备清单并重试缺失监听，不重建或重新抓取健康端点全部会话音量。旧 `IAudioSessionMonitor` 保持创建通知兼容能力；Desktop 已启动完整监听并提供托盘，阶段 4 在同一事件消费者后接入恢复。历史“Desktop 尚未启动监听”“保存恢复尚未实现”等描述已依据代码和验证修正，未改变原规划。
 
 ### 桌面窗口与托盘生命周期
 
@@ -134,7 +134,15 @@ OnExit 解除窗口/系统事件，先隐藏并释放 NotifyIcon、菜单和克�
 | 已保存音量状态 | 用户主动保存的配置与快照；异常实时值不得自动覆盖 |
 | 目标音量状态 | 当前启用规则期望达到的音量和静音状态 |
 
-第一版使用 `System.Text.Json` 读写本地 JSON，包含软件设置、已知应用、设备信息、音量快照、恢复规则和配置版本号；支持方案管理、导入导出、默认配置及用户偏好。按需区分输出设备，处理损坏、缺失字段和版本变化。采用安全写入、原子写入、配置备份及异常处理，降低异常退出造成配置丢失的风险。文件路径、版本迁移规则及具体备份 / 写入方案待确认。
+已在 Core 的 `Configuration/`、`Services/JsonConfigurationStore`、`Services/AudioConfigurationService` 及接口中实现。`System.Text.Json` 格式版本 1，包含设置、应用/设备、多个方案及当前方案 ID；方案有用户主动保存的快照和独立规则目标。配置位于用户确认的 `%LOCALAPPDATA%\MixDeck\settings.json`，`.bak` 是上一份有效配置。缺字段/损坏可读取备份但不自动覆盖原件；未知版本阻止普通保存且不降级。显式导入/恢复默认保留原件；同目录临时文件 Flush(true)/原子替换，配合锁文件及内容指纹防止旧实例覆盖。详细异常和大小边界见 [CONFIGURATION_VALIDATION.md](CONFIGURATION_VALIDATION.md)。
+
+`AudioConfigurationService` 不另行消费监听队列；`MainViewModel` 唯一消费者在 UI 上下文将变化转交服务，信号量串行化规则与配置操作，不轮询。启动/选择方案/启用/编辑规则后匹配当前状态；创建/音量变化仅处理相关对象，设备重建后应用原设备规则。每项应用前回读实际值，相等不写；Self 延迟快照也按当前值判断，避免回传循环。失败对象停止自动重试，刷新或新的设备/会话实例可重新判断；暂缺应用规则保留。
+
+`Services/AudioWriteGuard` 包装底层控制器并回读，基于失败或目标偏差超过 0.005 标记暂不可修改；UI 显示实际状态及原因、禁用对应滑块和静音，刷新可重试。它不把硬件支持位当成权限，也不宣称预知所有系统混合器灰色项。原始控制器继续由 DI 持有和释放。
+
+Desktop 新增 `ConfigurationViewModel`、`ConfigurationWindow` 与文件/确认对话框适配；规则和存储业务留 Core。Windows 的 `WindowsLoginStartup` 实现 `ILoginStartup`，只控制当前用户 MixDeck Run 项，带引号的 exe 路径与 --tray，默认关闭；导入不能隐式开启。App 在显示/Loaded 初始化后按 --tray 隐藏，托盘失败则保持可见。设置写入失败时回滚启动开关；真实系统重启证据仍待反馈。
+
+开发验收环境补充（2026-10-21）：由 MSIX 开发工具启动的进程曾使用私有 AppData/HKCU 视图，同环境回读无法证明系统可见。已保留原件并迁移到真实用户目录，通过普通 Explorer 启动、保存设置，使用独立 StdRegProv/Win32_StartupCommand/CIM_DataFile 核验。该处理没有改变配置路径约定、Run 实现或模块依赖；后续不能用工具私有副本覆盖实际用户配置，详见配置验收记录。
 
 ## 架构约束
 
@@ -154,7 +162,7 @@ OnExit 解除窗口/系统事件，先隐藏并释放 NotifyIcon、菜单和克�
 | 显示值与实际听感不一致 | 结合日志、API 状态与可复现实验定位；API 音量不代表最终声压，不能仅比较数值判断所有异常 |
 | 应用重启导致会话标识变化 | 使用应用级匹配，避免仅依赖 PID 或运行时标识 |
 | 设备切换使控制接口失效 | 重新枚举设备并重建监听 |
-| 规则与用户手动操作冲突 | 明确规则优先级和启停机制，具体策略待确认 |
+| 规则与用户手动操作冲突 | 用户已确认方案优先；受管项目在规则中改目标，停用即停止自动写，系统失败显示实际状态并停止重试 |
 | COM 线程或回调异常 | 请求及实时监听已按 MTA 生命周期管理，创建借用引用受控转移，事件投递与关闭有自动化验证；Windows 10/真实拔插及长期兼容验证仍待阶段 6 |
 | 会话尚未创建 | 保留规则，等待会话创建事件 |
 | 用户配置丢失 | 配置备份、原子写入及异常处理 |

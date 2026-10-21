@@ -20,6 +20,12 @@ public partial class MainWindow : Window
 
     private void OnExitClicked(object sender, RoutedEventArgs e) => ExitRequested?.Invoke(this, EventArgs.Empty);
 
+    private void OnConfigurationClicked(object sender, RoutedEventArgs e)
+    {
+        if (viewModel.Configuration is { } configuration)
+            new ConfigurationWindow(configuration) { Owner = this }.ShowDialog();
+    }
+
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;

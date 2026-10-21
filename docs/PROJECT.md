@@ -5,7 +5,7 @@
 ## 定位与目标
 
 - 项目名称：Windows Audio Manager（暂定）；类型：Windows 桌面音频管理工具；目标平台：Windows 10 / Windows 11。
-- 当前工作目录仍为 `G:\c#_code\MixDeck`，不改名；工程名称沿用 `AudioManager`。四项目及阶段 1～3 的核心、实时状态、WPF 界面和托盘已实现并在本机 Windows 11 完成功能验收，后续进度见 [STATUS.md](STATUS.md)。
+- 当前工作目录仍为 `G:\c#_code\MixDeck`，不改名；工程名称沿用 `AudioManager`。阶段 1～3 已完成功能验收；阶段 4 配置模块功能已实现，真实重启登录验收等待用户反馈，进度见 [STATUS.md](STATUS.md)。
 - 面向需要管理各应用音量、保存配置并恢复音量的 Windows 用户，增强原生音量混合器的管理能力。
 - 解决的使用问题：重启后音量配置变化、显示值与实际效果可能不一致、异常时需反复拖动滑块，以及缺少便捷的音量快照、备份和恢复机制。
 - 最终目标：稳定控制各应用音量，保存用户设置并按需自动恢复，减少配置丢失和重复手动调整。配置保存与恢复是主要功能，v0.4 是首个满足主要使用需求的版本。
@@ -37,9 +37,9 @@
 | 配置 | JSON 文件、System.Text.Json |
 | 日志 | Microsoft.Extensions.Logging |
 | 测试 | xUnit；具备环境时开展 Windows 音频集成测试 |
-| 版本与仓库管理 | Git、GitHub（均为计划，当前未建立仓库） |
+| 版本与仓库管理 | Git、GitHub；当前目录已有 Git 仓库及提交，main 分支跟踪 origin/main；本轮未初始化、提交或发布 |
 
-模块职责、API、依赖和关键流程见 [ARCHITECTURE.md](ARCHITECTURE.md)。技术选择保持用户规划；阶段 1 验收见 [CORE_VALIDATION.md](CORE_VALIDATION.md)，阶段 2 实时事件、状态模型及监听重建见 [REALTIME_STATE_VALIDATION.md](REALTIME_STATE_VALIDATION.md)。阶段 3 的 WPF 界面已随事件实时同步并支持托盘；最新完整回归 116 项（含 9 项真实集成）全部通过，桌面实机证据及验证缺口见 [DESKTOP_VALIDATION.md](DESKTOP_VALIDATION.md)。配置恢复、跨系统兼容、长期运行和发布仍待后续任务，不据此认定正式版完成。
+模块职责、API、依赖和关键流程见 [ARCHITECTURE.md](ARCHITECTURE.md)。技术选择保持用户规划；阶段 1～3 证据分别见 [CORE_VALIDATION.md](CORE_VALIDATION.md)、[REALTIME_STATE_VALIDATION.md](REALTIME_STATE_VALIDATION.md)、[DESKTOP_VALIDATION.md](DESKTOP_VALIDATION.md)。阶段 4 已实现配置保存/手动恢复、方案和规则、自动恢复、登录启动，最新完整回归 150 项（含 10 项真实集成）全部通过；用户确认的规则行为、实机证据及重启验收状态见 [CONFIGURATION_VALIDATION.md](CONFIGURATION_VALIDATION.md)。真实重启、跨系统兼容、长期运行和发布仍需证据，不据此认定正式版完成。
 
 ## 不可随意改变的原则
 
@@ -73,7 +73,7 @@
 ## 尚需细化或验证
 
 - 正式名称仍为暂定；原规划使用 `AudioManager/` 根目录，当前保留 `MixDeck/`，不据此自动改名。
-- 规则与手动调整的优先级、应用与设备的具体匹配规则、配置路径及版本迁移细节尚未确定；在对应开发任务中细化，不自行设定业务行为。
+- 2026-10-21 用户已确认：启用当前方案时以程序规则为准，系统拒绝时显示实际值并禁用；按完整路径统一同程序多会话；LocalAppData 配置/备份、当前用户登录启动默认关闭。按原端点 ID 匹配，运行时 PID/实例不作为持久化键；格式版本 1，未知版本拒绝覆盖，不猜测迁移。具体实现见配置验收记录；路径或端点变化时仍需用户重新保存。
 - Windows 10 的具体支持版本、依赖版本与兼容性、异常复现和修复效果、性能指标及发布安装方式尚待验证或明确。
 - 已创建解决方案、SDK 配置、四项目、阶段 1 所需依赖及 README/验收记录；`DECISIONS.md`、安装打包及发布文件尚未创建。后续继续按 [TASKS.md](TASKS.md) 推进，不把核心通过推定为完整软件或正式发布完成。
 

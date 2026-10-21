@@ -23,6 +23,7 @@ public sealed class SessionViewModel : ObservableObject
     private ImageSource? icon;
     private string? externalChangeText;
     private readonly SelfEchoGuard echoGuard;
+    private string? controlStatus;
 
     public SessionViewModel(AudioSession session, IAudioController controller, OperationLog log, TimeProvider? time = null)
     {
@@ -31,7 +32,7 @@ public sealed class SessionViewModel : ObservableObject
         this.log = log;
         echoGuard = new SelfEchoGuard(time);
         volumeWriter = new LatestValueWriter<float>(WriteVolumeAsync);
-        ToggleMuteCommand = new AsyncRelayCommand(ToggleMuteAsync, () => !isMuteChanging);
+        ToggleMuteCommand = new AsyncRelayCommand(ToggleMuteAsync, () => CanControl && !isMuteChanging);
         Update(session);
     }
 
@@ -40,6 +41,16 @@ public sealed class SessionViewModel : ObservableObject
 
     public AudioSessionKey Key { get; }
     public ICommand ToggleMuteCommand { get; }
+    public bool CanControl => controlStatus is null;
+    public string? ControlStatus => controlStatus;
+    internal void SetControlStatus(string? status)
+    {
+        if (SetProperty(ref controlStatus, status, nameof(ControlStatus)))
+        {
+            OnPropertyChanged(nameof(CanControl));
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
 
     public string Name { get => name; private set => SetProperty(ref name, value); }
     public string? ProcessPath { get => processPath; private set => SetProperty(ref processPath, value); }
@@ -71,6 +82,7 @@ public sealed class SessionViewModel : ObservableObject
         get => volume;
         set
         {
+            if (!CanControl) return;
             value = Math.Clamp(value, 0, 100);
             if (SetProperty(ref volume, value)) _ = volumeWriter.SubmitAsync((float)(value / 100));
         }
@@ -145,6 +157,7 @@ public sealed class SessionViewModel : ObservableObject
             var actual = await controller.GetSessionVolumeAsync(Key);
             volume = Math.Round(actual.Level * 100, 1);
             OnPropertyChanged(nameof(Volume));
+            IsMuted = actual.IsMuted;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -165,6 +178,7 @@ public sealed class SessionViewModel : ObservableObject
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             HandleFailure(target ? "静音" : "取消静音", exception);
+            await ReloadVolumeAsync();
         }
         finally { isMuteChanging = false; }
     }

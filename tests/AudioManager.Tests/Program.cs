@@ -9,6 +9,8 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "--desktop-audio-fixture") return DesktopAudioFixture.Run();
+        if (args.Length == 3 && args[0] == "--configuration-restore-probe" && uint.TryParse(args[2], out var pid))
+            return ConfigurationRestoreProbe.Run(args[1], pid);
         if (args.Length != 2 || args[0] != "--silent-session") return 2;
         try
         {
