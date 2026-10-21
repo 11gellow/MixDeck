@@ -1,0 +1,35 @@
+# .NET / WPF 构建与发布产物
+[Bb]in/
+[Oo]bj/
+/artifacts/
+
+# 测试结果与覆盖率报告
+[Tt]est[Rr]esults/
+*.trx
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
+coverage.opencover.xml
+
+# Visual Studio 本机缓存与用户设置
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.pubxml.user
+
+# JetBrains Rider 本机配置
+.idea/
+*.sln.iml
+*.DotSettings.user
+
+# 编辑器临时文件与操作系统元数据
+*.tmp
+*.temp
+*.bak
+*~
+Thumbs.db
+Desktop.ini
+.DS_Store
