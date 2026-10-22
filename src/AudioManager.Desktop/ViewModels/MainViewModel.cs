@@ -20,14 +20,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly IAudioStateMonitor monitor;
     private readonly AppIconProvider icons;
     private readonly TimeProvider time;
+    private readonly IDefaultAudioOutputController? defaultOutput;
     private readonly LatestValueWriter<(string DeviceId, float Level)> masterWriter;
     private readonly SelfEchoGuard masterEchoGuard;
     private readonly CancellationTokenSource lifetime = new();
     private AudioRuntimeState? runtimeState;
+    private readonly Dictionary<object, (Task<Guid> Token, Func<Task> Drain)> volumeEdits = [];
+    private Task? masterEditStarted;
     private string? defaultDeviceId;
     private string? loadedDeviceId;
     private string? deviceListSignature;
-    private bool followDefaultDevice = true;
+    private bool isSwitchingOutput;
     private bool suppressSelection;
     private bool isConsuming;
     private bool disposed;
@@ -47,26 +50,96 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string stateVersionText = "";
 
     public MainViewModel(IAudioController controller, IAudioStateMonitor monitor, AppIconProvider icons, OperationLog log, TimeProvider time,
-        ConfigurationViewModel? configuration = null)
+        ConfigurationViewModel? configuration = null, IDefaultAudioOutputController? defaultOutput = null)
     {
         this.controller = controller;
         this.monitor = monitor;
         this.icons = icons;
         this.time = time;
+        this.defaultOutput = defaultOutput;
         Log = log;
         Configuration = configuration;
-        if (Configuration is not null) Configuration.Service.Changed += OnConfigurationChanged;
+        if (Configuration is not null) Configuration.BeforeApply = FinishVolumeEditsAsync;
+        if (Configuration is not null)
+        {
+            Configuration.Service.Changed += OnConfigurationChanged;
+            Configuration.Service.RestoreReadback += OnRestoreReadback;
+        }
         if (controller is AudioWriteGuard guard) guard.Changed += UpdateControlAccess;
         masterEchoGuard = new SelfEchoGuard(time);
         masterWriter = new LatestValueWriter<(string, float)>(WriteMasterVolumeAsync);
-        RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsLoading);
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsLoading && !IsSwitchingOutput);
         ToggleMasterMuteCommand = new AsyncRelayCommand(ToggleMasterMuteAsync, () => CanControlMaster && !isMasterMuteChanging);
         Sessions.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowEmptySessions));
     }
 
     public OperationLog Log { get; }
     public ConfigurationViewModel? Configuration { get; }
-    public bool CanControlMaster => HasMasterVolume && MasterControlStatus is null;
+
+    public void BeginVolumeEdit(SessionViewModel? session = null)
+    {
+        object key = session ?? (object)this;
+        if (volumeEdits.ContainsKey(key) || Configuration is null || loadedDeviceId is null) return;
+        var deviceId = session?.Key.DeviceId ?? loadedDeviceId;
+        var token = BeginAsync();
+        volumeEdits.Add(key, (token, session is null ? masterWriter.WhenIdleAsync : session.WaitForVolumeAsync));
+        if (session is null) masterEditStarted = token;
+        else session.VolumeEditStarted = token;
+        async Task<Guid> BeginAsync()
+        {
+            try { return await Configuration.Service.BeginVolumeEditAsync(deviceId, session?.Key); }
+            catch (Exception exception) { Log.Error("无法延迟保存音量编辑；系统音量仍可调节", exception); return Guid.Empty; }
+        }
+    }
+
+    private readonly SemaphoreSlim finishEdits = new(1, 1);
+    public async Task FinishVolumeEditsAsync()
+    {
+        await finishEdits.WaitAsync();
+        try
+        {
+            foreach (var (key, edit) in volumeEdits.ToArray())
+            {
+                try
+                {
+                    var token = await edit.Token;
+                    await edit.Drain();
+                    await Configuration!.Service.EndVolumeEditAsync(token);
+                }
+                catch (Exception exception) { Log.Error("完成音量编辑失败", exception); }
+                finally
+                {
+                    volumeEdits.Remove(key);
+                    if (key is SessionViewModel session) session.VolumeEditStarted = null;
+                    else masterEditStarted = null;
+                }
+            }
+        }
+        finally { finishEdits.Release(); }
+    }
+
+    public async Task FlushEditsAsync()
+    {
+        await FinishVolumeEditsAsync();
+        await masterWriter.WhenIdleAsync();
+        foreach (var session in Sessions.ToArray()) await session.WaitForVolumeAsync();
+        if (Configuration is not null) await Configuration.CommitInputsAsync();
+    }
+    public bool CanControlMaster => HasMasterVolume && !IsSwitchingOutput && MasterControlStatus is null;
+    public bool IsSwitchingOutput
+    {
+        get => isSwitchingOutput;
+        private set
+        {
+            if (!SetProperty(ref isSwitchingOutput, value)) return;
+            OnPropertyChanged(nameof(CanSelectOutput));
+            OnPropertyChanged(nameof(CanControlMaster));
+            UpdateControlAccess();
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+    public bool CanSelectOutput => !IsLoading && !IsSwitchingOutput;
+    internal Task OutputSwitchTask { get; private set; } = Task.CompletedTask;
     private string? masterControlStatus;
     public string? MasterControlStatus { get => masterControlStatus; private set { SetProperty(ref masterControlStatus, value); OnPropertyChanged(nameof(CanControlMaster)); CommandManager.InvalidateRequerySuggested(); } }
     public ObservableCollection<DeviceItemViewModel> Devices { get; } = [];
@@ -79,14 +152,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         get => selectedDevice;
         set
         {
-            // 列表重建时 ComboBox 会回写 null，不能当作用户选择。
-            if (suppressSelection || ReferenceEquals(value, selectedDevice)) return;
-            selectedDevice = value;
-            OnPropertyChanged();
-            followDefaultDevice = value is null || value.Id == defaultDeviceId;
-            ApplySelectedDevice();
-            UpdateSyncState();
-            UpdateControlAccess();
+            // 状态回传重建列表不能反向写系统；只有用户选择另一个可用端点才发起切换。
+            if (suppressSelection || disposed || value is null || value.Id == selectedDevice?.Id) return;
+            if (IsSwitchingOutput) { OnPropertyChanged(); return; }
+            OutputSwitchTask = SwitchOutputAsync(value);
         }
     }
 
@@ -99,6 +168,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             RebuildDeviceList(SelectedDevice?.Id);
             ApplySelectedDevice();
             UpdateControlAccess();
+            if (Configuration is not null && Configuration.Service.Current.Settings.ShowUnavailableDevices != value)
+                Configuration.ShowUnavailableDevices = value;
         }
     }
 
@@ -107,7 +178,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         get => isLoading;
         private set
         {
-            if (SetProperty(ref isLoading, value)) CommandManager.InvalidateRequerySuggested();
+            if (SetProperty(ref isLoading, value))
+            {
+                OnPropertyChanged(nameof(CanSelectOutput));
+                CommandManager.InvalidateRequerySuggested();
+            }
         }
     }
 
@@ -169,17 +244,73 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void UpdateControlAccess()
     {
         MasterControlStatus = loadedDeviceId is { } id
-            ? (controller as AudioWriteGuard)?.Restriction(AudioWriteGuard.MasterKey(id)) is { } reason ? "无法修改：" + reason
-                : Configuration?.Service.IsManaged(id) == true ? "当前方案管理此项，请在“方案与自动恢复”中修改目标" : null
+            ? (controller as AudioWriteGuard)?.Restriction(AudioWriteGuard.MasterKey(id)) is { } reason ? "无法修改：" + reason : null
             : null;
         foreach (var session in Sessions)
         {
             var sessionReason = (controller as AudioWriteGuard)?.Restriction(AudioWriteGuard.SessionKey(session.Key));
-            var current = FindSession(session.Key);
-            session.SetControlStatus(sessionReason is not null ? "无法修改：" + sessionReason
-                : current is not null && Configuration?.Service.IsManaged(session.Key.DeviceId, current) == true
-                    ? "当前方案管理此项，请在方案中修改目标" : null);
+            session.SetControlStatus(IsSwitchingOutput ? "正在切换输出设备，请稍候" : sessionReason is not null ? "无法修改：" + sessionReason : null);
         }
+    }
+
+    private async Task SwitchOutputAsync(DeviceItemViewModel requested)
+    {
+        if (!requested.IsActive)
+        {
+            SetDeviceStatus($"该设备当前{requested.StateText}，不能设为系统输出设备", true);
+            OnPropertyChanged(nameof(SelectedDevice));
+            return;
+        }
+        if (defaultOutput is null)
+        {
+            SetDeviceStatus("当前无法切换系统输出设备，请重新启动程序后重试", true);
+            Log.Warning(DeviceStatusText, "本软件");
+            OnPropertyChanged(nameof(SelectedDevice));
+            return;
+        }
+        IsSwitchingOutput = true;
+        SetDeviceStatus($"正在切换系统输出设备：{requested.Name}…", false);
+        try
+        {
+            await FlushEditsAsync();
+            await defaultOutput.SetDefaultOutputDeviceAsync(requested.Id, lifetime.Token);
+            var state = await monitor.RefreshAsync(lifetime.Token);
+            ApplyState(state);
+            if (!string.Equals(state.DefaultOutputDevices.GetValueOrDefault(AudioDeviceRole.Multimedia), requested.Id, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("系统回读的默认输出与所选设备不同，未确认切换成功。");
+            if (Configuration is not null) await Configuration.Service.HandleStateAsync(state);
+            Log.Info($"系统默认输出已切换为：{requested.Name}", "本软件");
+        }
+        catch (Exception exception) when (exception is OperationCanceledException || disposed) { }
+        catch (Exception exception)
+        {
+            Log.Error($"切换输出设备“{requested.Name}”失败", exception);
+            try
+            {
+                var state = await monitor.RefreshAsync(lifetime.Token);
+                ApplyState(state);
+                if (Configuration is not null) await Configuration.Service.HandleStateAsync(state);
+            }
+            catch (Exception refreshException) when (refreshException is not OperationCanceledException)
+            { Log.Error("读取切换后的实际输出设备失败，请点击刷新重试", refreshException); }
+            SetDeviceStatus($"切换失败：{exception.Message} 当前显示设备：{SelectedDevice?.Name ?? "无"}", true);
+        }
+        finally
+        {
+            IsSwitchingOutput = false;
+            OnPropertyChanged(nameof(SelectedDevice));
+        }
+    }
+
+    private void OnRestoreReadback(string deviceId, AudioSessionKey? sessionKey, AudioVolume actual)
+    {
+        if (loadedDeviceId != deviceId) return;
+        if (sessionKey is null)
+        {
+            masterEchoGuard.Wrote(actual.Level);
+            ApplyMasterVolume(actual, force: true);
+        }
+        else Sessions.FirstOrDefault(session => session.Key == sessionKey)?.AcceptRestoreReadback(actual);
     }
 
     /// <summary>未运行时启动实时监听；运行中则重新枚举设备并重试失效监听。</summary>
@@ -190,6 +321,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var wasRunning = runtimeState is { IsRunning: true };
         try
         {
+            await FlushEditsAsync();
             (controller as AudioWriteGuard)?.ClearRestrictions();
             if (!wasRunning)
             {
@@ -269,7 +401,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (runtimeState is { } current && state.Revision < current.Revision) return;
         runtimeState = state;
         defaultDeviceId = state.DefaultOutputDevices.GetValueOrDefault(AudioDeviceRole.Multimedia);
-        var preferred = followDefaultDevice ? defaultDeviceId ?? SelectedDevice?.Id : SelectedDevice?.Id ?? defaultDeviceId;
+        var preferred = defaultDeviceId ?? SelectedDevice?.Id;
         RebuildDeviceList(preferred);
         ApplySelectedDevice(externalSession, externalMasterDevice);
         StateVersionText = $"状态版本 #{state.Revision} · {state.CapturedAt.ToLocalTime():HH:mm:ss}";
@@ -313,6 +445,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void ApplySelectedDevice(AudioSessionKey? externalSession = null, string? externalMasterDevice = null)
     {
         var device = SelectedDevice;
+        Configuration?.SetDevice(device?.Id, device?.Name);
         var entry = device is null ? null : runtimeState?.Devices.FirstOrDefault(item => item.Device.Id == device.Id);
         SetReadIssues((runtimeState?.Issues ?? []).Concat(entry?.Issues ?? []).ToList());
 
@@ -343,7 +476,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var switched = loadedDeviceId != device.Id;
         if (switched) ClearDeviceState();
         loadedDeviceId = device.Id;
-        ApplyMasterVolume(master, force: switched || Configuration?.Service.IsManaged(device.Id) == true, isExternal: externalMasterDevice == device.Id);
+        ApplyMasterVolume(master, force: switched, isExternal: externalMasterDevice == device.Id);
         HasMasterVolume = true;
         MergeSessions(entry.Sessions, externalSession);
         SetDeviceStatus(device.IsDefault ? "Windows 默认输出设备（多媒体）" : "非默认输出设备", false);
@@ -356,7 +489,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         foreach (var session in snapshot.Where(session => session.State != AudioSessionState.Expired))
         {
-            if (existing.Remove(session.Key, out var viewModel)) viewModel.Update(session, session.Key == externalSession || Configuration?.Service.IsManaged(session.Key.DeviceId, session) == true);
+            if (existing.Remove(session.Key, out var viewModel)) viewModel.Update(session, session.Key == externalSession);
             else
             {
                 viewModel = new SessionViewModel(session, controller, Log, time);
@@ -491,6 +624,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
+            if (masterEditStarted is { } started) await started;
             var result = await controller.SetMasterVolumeAsync(request.DeviceId, request.Level);
             masterEchoGuard.Wrote(result.Level);
             if (!masterWriter.HasQueuedValue && loadedDeviceId == request.DeviceId) ApplyMasterVolume(result, force: true);
@@ -572,7 +706,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         if (disposed) return;
         disposed = true;
-        if (Configuration is not null) Configuration.Service.Changed -= OnConfigurationChanged;
+        if (Configuration is not null)
+        {
+            Configuration.Service.Changed -= OnConfigurationChanged;
+            Configuration.Service.RestoreReadback -= OnRestoreReadback;
+        }
         if (controller is AudioWriteGuard guard) guard.Changed -= UpdateControlAccess;
         lifetime.Cancel();
         lifetime.Dispose();

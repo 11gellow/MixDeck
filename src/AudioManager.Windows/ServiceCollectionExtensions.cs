@@ -11,6 +11,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IAudioController, WindowsAudioController>();
         services.TryAddSingleton<IAudioSessionMonitor, WindowsAudioSessionMonitor>();
         services.TryAddSingleton<IAudioStateMonitor, WindowsAudioStateMonitor>();
+        services.TryAddSingleton<IDefaultAudioOutputController, WindowsDefaultAudioOutputController>();
         return services;
     }
 }

@@ -55,7 +55,7 @@ public sealed class JsonConfigurationStore(string filePath) : IConfigurationStor
             }
             catch (Exception exception) when (IsDataOrIoFailure(exception)) { }
             blocked = true;
-            return new(AudioConfiguration.Empty, ConfigurationLoadKind.Blocked, "无法读取有效配置和备份；自动恢复已禁用，普通保存被阻止。请检查文件权限，或显式导入/恢复默认；原文件会保留副本。");
+            return new(AudioConfiguration.Empty, ConfigurationLoadKind.Blocked, "无法读取有效配置和备份；自动保存和恢复已暂停，普通保存被阻止。请检查文件权限，或显式导入/恢复默认；原文件会保留副本。");
         }
         finally { gate.Release(); }
     }

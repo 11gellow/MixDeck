@@ -15,7 +15,8 @@ public sealed class ConfigurationRecoveryTests
         using var scenario = await ConfigurationScenario.CreateAsync();
         var session = scenario.Raw.AddSession("first", .37f, true);
         await scenario.Service.SaveSnapshotAsync(scenario.State(), "工作");
-        var savedJson = ConfigurationJson.Serialize(scenario.Service.Current);
+        var originalSnapshot = scenario.Service.Current.Profiles[0].Snapshot;
+        await scenario.Service.HandleStateAsync(scenario.State());
         scenario.Raw.Sessions[session.Key] = session with { Volume = new(.8f, false), ProcessId = 999 };
         var unrelated = scenario.Raw.AddSession("other", .91f, false, @"C:\Other\Player.exe");
         await scenario.Service.HandleStateAsync(scenario.State());
@@ -23,7 +24,7 @@ public sealed class ConfigurationRecoveryTests
         await scenario.Service.RestoreSnapshotAsync(scenario.State(), scenario.Service.Current.ActiveProfileId!.Value);
         Assert.Equal(new AudioVolume(.37f, true), scenario.Raw.Sessions[session.Key].Volume);
         Assert.Equal(.91f, scenario.Raw.Sessions[unrelated.Key].Volume.Level);
-        Assert.Equal(savedJson, ConfigurationJson.Serialize(scenario.Service.Current));
+        Assert.Equal(originalSnapshot, scenario.Service.Current.Profiles[0].Snapshot);
         Assert.Contains(scenario.Reports, report => report.Succeeded);
     }
 
@@ -37,7 +38,7 @@ public sealed class ConfigurationRecoveryTests
         var first = scenario.Raw.AddSession("new-1", .7f, path: @"c:\apps\PLAYER.exe", pid: 200);
         var second = scenario.Raw.AddSession("new-2", .8f, pid: 201);
         var other = scenario.Raw.AddSession("same-name", .9f, path: @"D:\Other\Player.exe", pid: 202);
-        await scenario.EnableAsync();
+        await scenario.StartAsync();
         await scenario.Service.HandleStateAsync(scenario.State());
         Assert.Equal(.24f, scenario.Raw.Sessions[first.Key].Volume.Level);
         Assert.Equal(.24f, scenario.Raw.Sessions[second.Key].Volume.Level);
@@ -61,25 +62,33 @@ public sealed class ConfigurationRecoveryTests
         Assert.Single(scenario.Service.Current.Profiles[0].Snapshot.Entries); // 只有主音量。
     }
 
-    [Fact]
-    public async Task ExternalDriftIsCorrectedSelfEchoIgnoredAndDisablingStopsAutomaticWrites()
+    [Theory]
+    [InlineData(AudioChangeOrigin.External)]
+    [InlineData(AudioChangeOrigin.Self)]
+    public async Task UserChangePersistsNewTargetUnifiesPeersAndKeepsSnapshotWithoutWriteLoop(AudioChangeOrigin origin)
     {
         using var scenario = await ConfigurationScenario.CreateAsync();
         var session = scenario.Raw.AddSession("a", .31f);
+        var peer = scenario.Raw.AddSession("b", .31f);
         await scenario.Service.SaveSnapshotAsync(scenario.State(), "方案");
-        await scenario.EnableAsync();
-        await scenario.Service.HandleStateAsync(scenario.State());
-        scenario.Raw.Sessions[session.Key] = session with { Volume = new(.8f, false) };
-        await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.External, session.Key);
-        Assert.Equal(.31f, scenario.Raw.Sessions[session.Key].Volume.Level);
+        await scenario.StartAsync();
+        var snapshot = scenario.Service.Current.Profiles[0].Snapshot;
+        scenario.Raw.Sessions[session.Key] = session with { Volume = new(.8f, true) };
+        await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, origin, session.Key);
+        Assert.Equal(new AudioVolume(.8f, true), scenario.Raw.Sessions[session.Key].Volume);
+        Assert.Equal(new AudioVolume(.8f, true), scenario.Raw.Sessions[peer.Key].Volume);
+        Assert.Equal(new SavedVolume(.8f, true), scenario.Service.Current.Profiles[0].Rules.Single(rule => rule.Target.Target.Application is not null).Target.Volume);
+        Assert.Equal(snapshot, scenario.Service.Current.Profiles[0].Snapshot);
+        var json = await File.ReadAllTextAsync(scenario.Store.FilePath);
         var count = scenario.Raw.Writes.Count;
-        await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.Self, session.Key);
+        await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.Self, peer.Key);
         Assert.Equal(count, scenario.Raw.Writes.Count);
-        await scenario.Service.UpdateSettingsAsync(scenario.Service.Current.Settings with { AutomaticRestoreEnabled = false });
-        scenario.Raw.Sessions[session.Key] = session with { Volume = new(.6f, false) };
-        await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.External, session.Key);
-        Assert.Equal(.6f, scenario.Raw.Sessions[session.Key].Volume.Level);
-        Assert.Equal(count, scenario.Raw.Writes.Count);
+        Assert.Equal(json, await File.ReadAllTextAsync(scenario.Store.FilePath));
+        using var reloaded = new AudioConfigurationService(new JsonConfigurationStore(scenario.Store.FilePath), scenario.Guard);
+        await reloaded.InitializeAsync();
+        scenario.Raw.Sessions[session.Key] = session with { Volume = new(.1f, false) };
+        await reloaded.HandleStateAsync(scenario.State());
+        Assert.Equal(new AudioVolume(.8f, true), scenario.Raw.Sessions[session.Key].Volume);
     }
 
     [Fact]
@@ -89,7 +98,7 @@ public sealed class ConfigurationRecoveryTests
         scenario.Raw.AddSession("old", .29f);
         await scenario.Service.SaveSnapshotAsync(scenario.State(), "方案");
         scenario.Raw.Sessions.Clear();
-        await scenario.EnableAsync();
+        await scenario.StartAsync();
         await scenario.Service.HandleStateAsync(scenario.State());
         var late = scenario.Raw.AddSession("late", 1);
         await scenario.PushAsync(AudioStateChangeKind.SessionCreated, AudioChangeOrigin.System, late.Key);
@@ -116,11 +125,10 @@ public sealed class ConfigurationRecoveryTests
         await scenario.Service.SaveSnapshotAsync(scenario.State(), "二");
         var second = scenario.Service.Current.Profiles[1];
         Assert.Equal(second.Id, scenario.Service.Current.ActiveProfileId);
-        await scenario.Service.UpdateRulesAsync(first.Id, first.Rules.Select(rule => rule.Target.Target.Application is null ? rule
-            : rule with { Target = rule.Target with { Volume = new(.2f, true) } }).ToArray());
+        await scenario.Service.UpdateRuleAsync(first.Id, "device-a", first.Rules.Single(rule => rule.Target.Target.Application is not null).Id, level: .2f, muted: true);
         Assert.Equal(.3f, scenario.Service.Current.Profiles[0].Snapshot.Entries.Single(entry => entry.Target.Application is not null).Volume.Level);
         await scenario.Service.HandleStateAsync(scenario.State());
-        await scenario.EnableAsync();
+        await scenario.StartAsync();
         await scenario.Service.SelectProfileAsync(first.Id);
         Assert.Equal(new AudioVolume(.2f, true), scenario.Raw.Sessions[session.Key].Volume);
         await scenario.Service.DeleteProfileAsync(first.Id);
@@ -138,11 +146,11 @@ public sealed class ConfigurationRecoveryTests
         using var scenario = await ConfigurationScenario.CreateAsync();
         var session = scenario.Raw.AddSession("a", .32f);
         await scenario.Service.SaveSnapshotAsync(scenario.State(), "方案");
-        await scenario.EnableAsync();
+        await scenario.StartAsync();
         scenario.Raw.Sessions[session.Key] = session with { Volume = new(.9f, false) };
         scenario.Raw.IgnoreWrites = ignoreWrite;
         scenario.Raw.Failure = ignoreWrite ? null : new UnauthorizedAccessException("系统限制");
-        await scenario.Service.HandleStateAsync(scenario.State());
+        await scenario.Service.HandleStateAsync(scenario.State(), retry: true);
         Assert.NotNull(scenario.Guard.Restriction(AudioWriteGuard.SessionKey(session.Key)));
         Assert.Equal(.9f, (await scenario.Guard.GetSessionVolumeAsync(session.Key)).Level);
         Assert.Contains(scenario.Reports, report => !report.Succeeded && report.Message.Contains("实际"));
@@ -158,14 +166,14 @@ public sealed class ConfigurationRecoveryTests
     }
 
     [Fact]
-    public async Task ImportDisablesAutomaticWritesAndResetDoesNotChangeSystemVolume()
+    public async Task ImportPreservesLocalLoginPreferenceAndResetDoesNotChangeSystemVolume()
     {
         using var scenario = await ConfigurationScenario.CreateAsync();
         var sample = ConfigurationStoreTests.Sample();
         var import = Path.Combine(scenario.Directory, "import.json");
         await File.WriteAllTextAsync(import, ConfigurationJson.Serialize(sample));
         await scenario.Service.ImportAsync(import);
-        Assert.False(scenario.Service.Current.Settings.AutomaticRestoreEnabled);
+        Assert.False(scenario.Service.Current.Settings.StartAtLogin);
         await scenario.Service.ResetAsync();
         Assert.Empty(scenario.Service.Current.Profiles);
         Assert.Empty(scenario.Raw.Writes);
@@ -180,29 +188,31 @@ public sealed class ConfigurationRecoveryTests
         await scenario.Service.SaveSnapshotAsync(scenario.State(), "系统");
         Assert.Equal(ApplicationIdentityKind.SystemSounds, Assert.Single(scenario.Service.Current.KnownApplications).Kind);
         var profile = scenario.Service.Current.Profiles[0];
-        await scenario.Service.UpdateRulesAsync(profile.Id, profile.Rules.Select(rule => rule with { Enabled = false }).ToArray());
+        foreach (var rule in profile.Rules) await scenario.Service.UpdateRuleAsync(profile.Id, "device-a", rule.Id, enabled: false);
         scenario.Raw.Sessions[system.Key] = system with { Volume = new(.8f, false) };
-        await scenario.EnableAsync();
+        await scenario.StartAsync();
         await scenario.Service.HandleStateAsync(scenario.State());
         Assert.Empty(scenario.Raw.Writes);
     }
 
     [Fact]
-    public async Task DelayedSelfSnapshotReadsCurrentSystemValueWithoutWriteLoopAndManualSnapshotCannotFightActiveRules()
+    public async Task DelayedSelfSnapshotSavesCurrentReadbackAndManualSnapshotBecomesCurrentTarget()
     {
         using var scenario = await ConfigurationScenario.CreateAsync();
         var session = scenario.Raw.AddSession("a", .25f);
         await scenario.Service.SaveSnapshotAsync(scenario.State(), "方案");
-        await scenario.EnableAsync();
+        await scenario.StartAsync();
         var stale = scenario.State();
         scenario.Raw.Sessions[session.Key] = session with { Volume = new(.8f, false) };
         await scenario.Service.HandleStateAsync(stale, new(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.Self, stale, "device-a", session.Key));
-        Assert.Equal(.25f, scenario.Raw.Sessions[session.Key].Volume.Level);
+        Assert.Equal(.8f, scenario.Raw.Sessions[session.Key].Volume.Level);
         var writes = scenario.Raw.Writes.Count;
         await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.Self, session.Key);
         Assert.Equal(writes, scenario.Raw.Writes.Count);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scenario.Service.RestoreSnapshotAsync(scenario.State(), scenario.Service.Current.ActiveProfileId!.Value));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scenario.Service.UpdateRulesAsync(Guid.NewGuid(), []));
+        await scenario.Service.RestoreSnapshotAsync(scenario.State(), scenario.Service.Current.ActiveProfileId!.Value);
+        Assert.Equal(.25f, scenario.Raw.Sessions[session.Key].Volume.Level);
+        Assert.Equal(.25f, scenario.Service.Current.Profiles[0].Rules.Single(rule => rule.Target.Target.Application is not null).Target.Volume.Level);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scenario.Service.UpdateRuleAsync(Guid.NewGuid(), "device-a", Guid.NewGuid(), level: .2f));
     }
 
     [Fact]
@@ -223,6 +233,131 @@ public sealed class ConfigurationRecoveryTests
         Assert.Empty(scenario.Raw.Writes);
         Assert.Equal(2, reloaded.Current.Profiles[0].Snapshot.Entries.Count);
     }
+    [Fact]
+    public async Task DeviceProfilesSwitchWithDefaultAndPersistIndependentMasterAndAppTargets()
+    {
+        using var scenario = await ConfigurationScenario.CreateAsync();
+        scenario.OtherDevices.Add("device-b");
+        scenario.Raw.Masters["device-a"] = new(.2f, false);
+        scenario.Raw.Masters["device-b"] = new(.8f, true);
+        var first = scenario.Raw.AddSession("a", .3f);
+        var second = scenario.Raw.AddSession("b", .7f, deviceId: "device-b");
+        await scenario.Service.HandleStateAsync(scenario.State());
+        var a = scenario.Service.ProfileForDevice("device-a")!;
+        var b = scenario.Service.ProfileForDevice("device-b")!;
+        Assert.NotEqual(a.Id, b.Id);
+        Assert.Equal(a.Id, scenario.Service.Current.ActiveProfileId);
+        scenario.Raw.Masters["device-b"] = new(.66f, false);
+        var state = scenario.State();
+        await scenario.Service.HandleStateAsync(state, new(AudioStateChangeKind.MasterVolumeChanged, AudioChangeOrigin.External, state, "device-b"));
+        scenario.Raw.Sessions[second.Key] = second with { Volume = new(.62f, true) };
+        state = scenario.State();
+        await scenario.Service.HandleStateAsync(state, new(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.External, state, "device-b", second.Key));
+        scenario.Raw.Masters["device-b"] = new(.1f, true);
+        scenario.Raw.Sessions[second.Key] = second;
+        scenario.DefaultDeviceId = "device-b";
+        await scenario.PushAsync(AudioStateChangeKind.DefaultDeviceChanged, AudioChangeOrigin.System);
+        Assert.Equal(b.Id, scenario.Service.Current.ActiveProfileId);
+        Assert.Equal(new AudioVolume(.66f, false), scenario.Raw.Masters["device-b"]);
+        Assert.Equal(new AudioVolume(.62f, true), scenario.Raw.Sessions[second.Key].Volume);
+        Assert.Equal(new AudioVolume(.2f, false), scenario.Raw.Master);
+        Assert.Equal(first.Volume, scenario.Raw.Sessions[first.Key].Volume);
+        scenario.DefaultDeviceId = "device-a";
+        await scenario.PushAsync(AudioStateChangeKind.DefaultDeviceChanged, AudioChangeOrigin.System);
+        Assert.Equal(a.Id, scenario.Service.Current.ActiveProfileId);
+        var loaded = (await new JsonConfigurationStore(scenario.Store.FilePath).LoadAsync()).Configuration;
+        Assert.Equal(2, loaded.DeviceProfiles.Count);
+        Assert.Equal(.66f, loaded.Profiles.Single(profile => profile.Id == b.Id).Rules.Single(rule => rule.Target.Target.Application is null).Target.Volume.Level);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scenario.Service.SelectProfileAsync(b.Id, "device-a"));
+    }
+
+    [Fact]
+    public async Task FirstRunRemembersDeviceAutomaticallyAndUnknownLateApplicationIsLearned()
+    {
+        using var scenario = await ConfigurationScenario.CreateAsync();
+        await scenario.Service.HandleStateAsync(scenario.State());
+        Assert.Single(scenario.Service.Current.Profiles);
+        var late = scenario.Raw.AddSession("new", .42f, true);
+        await scenario.PushAsync(AudioStateChangeKind.SessionCreated, AudioChangeOrigin.System, late.Key);
+        Assert.Equal(new SavedVolume(.42f, true), scenario.Service.Current.Profiles[0].Rules.Single(rule => rule.Target.Target.Application is not null).Target.Volume);
+        Assert.Empty(scenario.Raw.Writes);
+    }
+
+    [Fact]
+    public async Task RestoreEchoAndRestrictionCannotReplaceSavedTargetWithFailedOrStaleValues()
+    {
+        using var scenario = await ConfigurationScenario.CreateAsync();
+        var session = scenario.Raw.AddSession("a", .25f);
+        await scenario.Service.SaveSnapshotAsync(scenario.State(), "方案");
+        scenario.Raw.Sessions[session.Key] = session with { Volume = new(.9f, true) };
+        var stale = scenario.State();
+        await scenario.Service.HandleStateAsync(stale);
+        var saved = await File.ReadAllTextAsync(scenario.Store.FilePath);
+        await scenario.Service.HandleStateAsync(stale, new(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.Self, stale, "device-a", session.Key));
+        Assert.Equal(saved, await File.ReadAllTextAsync(scenario.Store.FilePath));
+        scenario.Raw.IgnoreWrites = true;
+        scenario.Raw.Sessions[session.Key] = session with { Volume = new(.8f, false) };
+        await scenario.Service.HandleStateAsync(scenario.State(), retry: true);
+        await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.Self, session.Key);
+        Assert.Equal(saved, await File.ReadAllTextAsync(scenario.Store.FilePath));
+        Assert.NotNull(scenario.Guard.Restriction(AudioWriteGuard.SessionKey(session.Key)));
+    }
+
+    [Fact]
+    public async Task FailedAutosaveKeepsPreviousFileAndTargetWithoutUndoingUserVolume()
+    {
+        using var scenario = await ConfigurationScenario.CreateAsync();
+        var session = scenario.Raw.AddSession("a", .3f);
+        await scenario.Service.HandleStateAsync(scenario.State());
+        var before = ConfigurationJson.Serialize(scenario.Service.Current);
+        await File.WriteAllTextAsync(scenario.Store.FilePath, "changed-by-other-process");
+        scenario.Raw.Sessions[session.Key] = session with { Volume = new(.8f, false) };
+        await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.External, session.Key);
+        Assert.Equal(.8f, scenario.Raw.Sessions[session.Key].Volume.Level);
+        Assert.Equal(before, ConfigurationJson.Serialize(scenario.Service.Current));
+        Assert.Equal("changed-by-other-process", await File.ReadAllTextAsync(scenario.Store.FilePath));
+        Assert.Contains(scenario.Reports, report => !report.Succeeded && report.Message.Contains("自动保存失败"));
+    }
+
+    [Fact]
+    public async Task BlockedConfigurationDoesNotCaptureCurrentVolumeOrWriteAudio()
+    {
+        using var scenario = await ConfigurationScenario.CreateAsync();
+        await File.WriteAllTextAsync(scenario.Store.FilePath, "{\"version\":999}");
+        using var service = new AudioConfigurationService(new JsonConfigurationStore(scenario.Store.FilePath), scenario.Guard);
+        await service.InitializeAsync();
+        await service.HandleStateAsync(scenario.State());
+        Assert.Empty(service.Current.Profiles);
+        Assert.Empty(scenario.Raw.Writes);
+        Assert.Equal("{\"version\":999}", await File.ReadAllTextAsync(scenario.Store.FilePath));
+    }
+
+    [Fact]
+    public async Task ExplicitResetUnblocksAutosaveAfterInvalidConfiguration()
+    {
+        using var scenario = await ConfigurationScenario.CreateAsync();
+        await File.WriteAllTextAsync(scenario.Store.FilePath, "{broken");
+        using var service = new AudioConfigurationService(new JsonConfigurationStore(scenario.Store.FilePath), scenario.Guard);
+        await service.InitializeAsync();
+        Assert.Equal(ConfigurationLoadKind.Blocked, service.LoadResult!.Kind);
+        await service.ResetAsync();
+        await service.HandleStateAsync(scenario.State());
+        Assert.Single(service.Current.Profiles);
+        Assert.Equal(ConfigurationLoadKind.Loaded, (await new JsonConfigurationStore(scenario.Store.FilePath).LoadAsync()).Kind);
+        Assert.Equal("{broken", await File.ReadAllTextAsync(Assert.Single(System.IO.Directory.GetFiles(scenario.Directory, "*.preserved-*"))));
+    }
+
+    [Fact]
+    public async Task FineUserAdjustmentIsSavedEvenWithinRestoreTolerance()
+    {
+        using var scenario = await ConfigurationScenario.CreateAsync();
+        var session = scenario.Raw.AddSession("a", .3f);
+        await scenario.Service.HandleStateAsync(scenario.State());
+        scenario.Raw.Sessions[session.Key] = session with { Volume = new(.303f, false) };
+        await scenario.PushAsync(AudioStateChangeKind.SessionVolumeChanged, AudioChangeOrigin.External, session.Key);
+        Assert.Equal(.303f, scenario.Service.ProfileForDevice("device-a")!.Rules.Single(rule => rule.Target.Target.Application is not null).Target.Volume.Level);
+    }
+
 }
 
 internal sealed class ConfigurationScenario : IDisposable
@@ -235,6 +370,8 @@ internal sealed class ConfigurationScenario : IDisposable
     public List<RestoreResult> Reports { get; } = [];
     public bool Listening { get; set; } = true;
     private long revision;
+    public string? DefaultDeviceId { get; set; } = "device-a";
+    public List<string> OtherDevices { get; } = [];
     private ConfigurationScenario()
     {
         System.IO.Directory.CreateDirectory(Directory);
@@ -251,8 +388,10 @@ internal sealed class ConfigurationScenario : IDisposable
     }
     public AudioRuntimeState State() => new(++revision, DateTimeOffset.UtcNow, true,
         [new(new("device-a", "耳机", Listening ? AudioDeviceState.Active : AudioDeviceState.Unplugged), Listening ? Raw.Master : null,
-            Listening, Listening ? Raw.Sessions.Values.ToArray() : [], [])], new Dictionary<AudioDeviceRole, string?> { [AudioDeviceRole.Multimedia] = "device-a" }, []);
-    public Task EnableAsync() => Service.UpdateSettingsAsync(Service.Current.Settings with { AutomaticRestoreEnabled = true });
+            Listening, Listening ? Raw.Sessions.Values.Where(session => session.Key.DeviceId == "device-a").ToArray() : [], [])
+        , .. OtherDevices.Select(id => new AudioDeviceRuntimeState(new(id, id, AudioDeviceState.Active), Raw.Masters.GetValueOrDefault(id, new(.5f, false)), true,
+            Raw.Sessions.Values.Where(session => session.Key.DeviceId == id).ToArray(), []))], new Dictionary<AudioDeviceRole, string?> { [AudioDeviceRole.Multimedia] = DefaultDeviceId }, []);
+    public Task StartAsync() => Service.HandleStateAsync(State());
     public Task PushAsync(AudioStateChangeKind kind, AudioChangeOrigin origin, AudioSessionKey? sessionKey = null)
     {
         var state = State();
@@ -269,21 +408,22 @@ internal sealed class ConfigurationTestController : IAudioController
 {
     public Dictionary<AudioSessionKey, AudioSession> Sessions { get; } = [];
     public List<string> Writes { get; } = [];
-    public AudioVolume Master { get; set; } = new(.5f, false);
+    public Dictionary<string, AudioVolume> Masters { get; } = new() { ["device-a"] = new(.5f, false) };
+    public AudioVolume Master { get => Masters["device-a"]; set => Masters["device-a"] = value; }
     public bool IgnoreWrites { get; set; }
     public Exception? Failure { get; set; }
-    public AudioSession AddSession(string instance, float level, bool muted = false, string? path = @"C:\Apps\Player.exe", uint pid = 100)
+    public AudioSession AddSession(string instance, float level, bool muted = false, string? path = @"C:\Apps\Player.exe", uint pid = 100, string deviceId = "device-a")
     {
-        var session = new AudioSession(new("device-a", instance), "volatile-" + instance, pid, "Player", path, false, AudioSessionState.Active, new(level, muted));
+        var session = new AudioSession(new(deviceId, instance), "volatile-" + instance, pid, "Player", path, false, AudioSessionState.Active, new(level, muted));
         Sessions[session.Key] = session;
         return session;
     }
-    public Task<AudioVolume> GetMasterVolumeAsync(string deviceId, CancellationToken cancellationToken = default) => Task.FromResult(Master);
+    public Task<AudioVolume> GetMasterVolumeAsync(string deviceId, CancellationToken cancellationToken = default) => Task.FromResult(Masters.GetValueOrDefault(deviceId, new(.5f, false)));
     public Task<AudioVolume> GetSessionVolumeAsync(AudioSessionKey key, CancellationToken cancellationToken = default) => Task.FromResult(Sessions[key].Volume);
     public Task<AudioVolume> SetMasterVolumeAsync(string deviceId, float level, CancellationToken cancellationToken = default)
-        => Write(deviceId, () => { if (!IgnoreWrites) Master = new(level, Master.IsMuted); return Master; });
+        => Write(deviceId, () => { var current = Masters.GetValueOrDefault(deviceId, new(.5f, false)); if (!IgnoreWrites) Masters[deviceId] = new(level, current.IsMuted); return Masters.GetValueOrDefault(deviceId, current); });
     public Task<AudioVolume> SetMasterMuteAsync(string deviceId, bool isMuted, CancellationToken cancellationToken = default)
-        => Write(deviceId, () => { if (!IgnoreWrites) Master = new(Master.Level, isMuted); return Master; });
+        => Write(deviceId, () => { var current = Masters.GetValueOrDefault(deviceId, new(.5f, false)); if (!IgnoreWrites) Masters[deviceId] = new(current.Level, isMuted); return Masters.GetValueOrDefault(deviceId, current); });
     public Task<AudioVolume> SetSessionVolumeAsync(AudioSessionKey key, float level, CancellationToken cancellationToken = default)
         => Write(key.DeviceId + ":" + key.InstanceId, () => { var session = Sessions[key]; if (!IgnoreWrites) Sessions[key] = session with { Volume = new(level, session.Volume.IsMuted) }; return Sessions[key].Volume; });
     public Task<AudioVolume> SetSessionMuteAsync(AudioSessionKey key, bool isMuted, CancellationToken cancellationToken = default)

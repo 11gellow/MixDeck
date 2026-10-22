@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:views="clr-namespace:AudioManager.Desktop.Views"
         xmlns:vm="clr-namespace:AudioManager.Desktop.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
@@ -18,7 +19,15 @@
         <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
     </Window.InputBindings>
 
-    <Grid Margin="20,16,20,12">
+    <DockPanel Margin="20,16,20,12">
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <Button DockPanel.Dock="Right" Content="退出程序" Padding="12,4" Click="OnExitClicked" />
+            <TextBlock x:Name="LifetimeText" Text="" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Style="{StaticResource SecondaryTextStyle}" Margin="0,0,12,0" />
+        </DockPanel>
+    <TabControl x:Name="Pages" SelectionChanged="OnPageChanged">
+      <TabItem Header="音量管理">
+    <Grid Margin="0,12,0,0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -106,7 +115,8 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="输出设备" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" Margin="0,0,16,0" />
                     <ComboBox Grid.Column="1" Height="34" VerticalContentAlignment="Center" Padding="8,0"
-                              ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}" AutomationProperties.Name="管理的输出设备">
+                              ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}" IsEnabled="{Binding CanSelectOutput}"
+                              ToolTip="选择后切换 Windows 输出设备，并应用该设备的音量方案" AutomationProperties.Name="Windows 输出设备">
                         <ComboBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:DeviceItemViewModel}">
                                 <StackPanel Orientation="Horizontal">
@@ -192,6 +202,7 @@
                         <TextBlock Text="{Binding MasterControlStatus}" Foreground="{StaticResource WarningBrush}" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                     <Slider Grid.Column="2" Style="{StaticResource VolumeSliderStyle}" Margin="0,0,12,0"
+                            PreviewMouseDown="OnSliderMouseDown" PreviewKeyDown="OnSliderKeyDown" PreviewKeyUp="OnSliderKeyUp" PreviewMouseWheel="OnSliderWheel"
                             Value="{Binding MasterVolume}" IsEnabled="{Binding CanControlMaster}" AutomationProperties.Name="系统主音量" />
                     <TextBlock Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right" FontSize="14"
                                Text="{Binding MasterVolume, StringFormat={}{0:0}%}" />
@@ -302,6 +313,7 @@
                                     </Button>
 
                                     <Slider Grid.Column="3" Style="{StaticResource VolumeSliderStyle}" Margin="0,0,12,0"
+                                            PreviewMouseDown="OnSliderMouseDown" PreviewKeyDown="OnSliderKeyDown" PreviewKeyUp="OnSliderKeyUp" PreviewMouseWheel="OnSliderWheel"
                                             Value="{Binding Volume}" IsEnabled="{Binding CanControl}" AutomationProperties.Name="{Binding DisplayName}" />
                                     <TextBlock Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Right"
                                                Text="{Binding Volume, StringFormat={}{0:0}%}" />
@@ -371,11 +383,10 @@
                 </ScrollViewer>
             </Border>
         </Expander>
-        <DockPanel Grid.Row="5" Margin="0,10,0,0">
-            <Button DockPanel.Dock="Right" Content="退出程序" Padding="12,4" Click="OnExitClicked" />
-            <Button DockPanel.Dock="Left" Content="方案与自动恢复" Padding="12,4" Margin="0,0,12,0" Click="OnConfigurationClicked" />
-            <TextBlock x:Name="LifetimeText" Text="" VerticalAlignment="Center" TextWrapping="Wrap"
-                       Style="{StaticResource SecondaryTextStyle}" Margin="0,0,12,0" />
-        </DockPanel>
+
     </Grid>
+      </TabItem>
+      <TabItem Header="高级选项"><views:AdvancedOptionsView DataContext="{Binding Configuration}" /></TabItem>
+    </TabControl>
+    </DockPanel>
 </Window>

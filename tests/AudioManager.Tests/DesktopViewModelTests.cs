@@ -13,6 +13,66 @@ public sealed class DesktopViewModelTests
     private const string DeviceB = "device-b";
 
     [Fact]
+    public async Task SelectingOutputChangesWindowsDefaultInsteadOfOnlyDisplayingItsSessions()
+    {
+        var (monitor, controller, viewModel) = Create();
+        monitor.AddDevice(DeviceB, "Headphones");
+        await viewModel.InitializeAsync();
+        viewModel.SelectedDevice = viewModel.Devices.Single(device => device.Id == DeviceB);
+        await viewModel.OutputSwitchTask;
+        Assert.Equal(new[] { DeviceB }, controller.DefaultWrites);
+        Assert.Equal(DeviceB, (await monitor.GetStateAsync()).DefaultOutputDevices[AudioDeviceRole.Multimedia]);
+        Assert.True(viewModel.SelectedDevice?.IsDefault);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RejectedOrUnconfirmedOutputSelectionKeepsActualDefaultAndReportsFailure(bool ineffective)
+    {
+        var (monitor, controller, viewModel) = Create();
+        monitor.AddDevice(DeviceB, "Headphones");
+        await viewModel.InitializeAsync();
+        controller.IgnoreDefaultWrites = ineffective;
+        controller.DefaultFailure = ineffective ? null : new UnauthorizedAccessException("系统拒绝切换");
+        viewModel.SelectedDevice = viewModel.Devices.Single(device => device.Id == DeviceB);
+        await viewModel.OutputSwitchTask;
+        Assert.Equal(DeviceA, viewModel.SelectedDevice?.Id);
+        Assert.True(viewModel.SelectedDevice?.IsDefault);
+        Assert.Contains("切换失败", viewModel.DeviceStatusText);
+        Assert.False(viewModel.IsSwitchingOutput);
+        Assert.True(viewModel.CanSelectOutput);
+        Assert.True(viewModel.CanControlMaster);
+        Assert.Contains(viewModel.Log.Entries, entry => entry.IsError);
+    }
+
+    [Fact]
+    public async Task PendingOutputSelectionDisablesControlsAndRefreshEventsDoNotWriteBack()
+    {
+        var (monitor, controller, viewModel) = Create(Session(DeviceA, "a", "Player", .5f));
+        monitor.AddDevice(DeviceB, "Headphones");
+        await viewModel.InitializeAsync();
+        controller.DefaultGate = new();
+        viewModel.SelectedDevice = viewModel.Devices.Single(device => device.Id == DeviceB);
+        Assert.True(viewModel.IsSwitchingOutput);
+        Assert.False(viewModel.CanSelectOutput);
+        Assert.False(viewModel.CanControlMaster);
+        Assert.False(viewModel.Sessions[0].CanControl);
+        Assert.Equal(DeviceA, viewModel.SelectedDevice?.Id);
+        monitor.Push(AudioStateChangeKind.DevicesChanged, AudioChangeOrigin.System);
+        Assert.Single(controller.DefaultWrites);
+        controller.DefaultGate.SetResult();
+        await viewModel.OutputSwitchTask;
+        Assert.Equal(DeviceB, viewModel.SelectedDevice?.Id);
+        Assert.True(viewModel.SelectedDevice?.IsDefault);
+        Assert.True(viewModel.CanControlMaster);
+        monitor.SetDefault(DeviceA);
+        monitor.Push(AudioStateChangeKind.DefaultDeviceChanged, AudioChangeOrigin.System, DeviceA);
+        Assert.Equal(DeviceA, viewModel.SelectedDevice?.Id);
+        Assert.Single(controller.DefaultWrites);
+    }
+
+    [Fact]
     public async Task FailedMasterWriteReportsErrorAndReloadsActualVolume()
     {
         var (_, controller, viewModel) = Create();
@@ -215,9 +275,9 @@ public sealed class DesktopViewModelTests
     }
 
     [Fact]
-    public async Task DefaultDeviceChangeIsFollowedUnlessUserPickedAnotherDevice()
+    public async Task DefaultDeviceChangeAlwaysFollowsWindowsAndUserSelectionWritesSystem()
     {
-        var (monitor, _, viewModel) = Create(Session(DeviceA, "a", "Alpha", 0.5f));
+        var (monitor, controller, viewModel) = Create(Session(DeviceA, "a", "Alpha", 0.5f));
         monitor.AddDevice(DeviceB, "Headphones", sessions: [Session(DeviceB, "h", "Music", 0.3f)]);
         await viewModel.InitializeAsync();
 
@@ -228,11 +288,13 @@ public sealed class DesktopViewModelTests
         Assert.Contains("Headphones", viewModel.Log.Latest?.Text);
 
         viewModel.SelectedDevice = viewModel.Devices.Single(device => device.Id == DeviceA);
+        await viewModel.OutputSwitchTask;
+        Assert.Equal(new[] { DeviceA }, controller.DefaultWrites);
         monitor.SetDefault(DeviceA);
         monitor.Push(AudioStateChangeKind.DefaultDeviceChanged, AudioChangeOrigin.External, DeviceA, message: nameof(AudioDeviceRole.Multimedia));
         monitor.SetDefault(DeviceB);
         monitor.Push(AudioStateChangeKind.DefaultDeviceChanged, AudioChangeOrigin.External, DeviceB, message: nameof(AudioDeviceRole.Multimedia));
-        Assert.Equal(DeviceA, viewModel.SelectedDevice?.Id);
+        Assert.Equal(DeviceB, viewModel.SelectedDevice?.Id);
     }
 
     [Fact]
@@ -368,11 +430,11 @@ public sealed class DesktopViewModelTests
         viewModel.ShowUnavailableDevices = true;
         viewModel.SelectedDevice = viewModel.Devices.Single(device => device.Id == DeviceB);
 
-        Assert.False(viewModel.HasMasterVolume);
+        Assert.True(viewModel.HasMasterVolume);
         Assert.True(viewModel.IsDeviceWarning);
         Assert.Contains("未插入", viewModel.DeviceStatusText);
-        viewModel.MasterVolume = 90;
-        Assert.Empty(controller.MasterWrites);
+        Assert.Equal(DeviceA, viewModel.SelectedDevice?.Id);
+        Assert.Empty(controller.DefaultWrites);
     }
 
     private static (FakeMonitor Monitor, FakeController Controller, MainViewModel ViewModel) Create(params AudioSession[] sessions)
@@ -383,7 +445,7 @@ public sealed class DesktopViewModelTests
         monitor.AddDevice(DeviceA, "Speakers", sessions: sessions);
         monitor.SetDefault(DeviceA);
         var controller = new FakeController(monitor);
-        return (monitor, controller, new MainViewModel(controller, monitor, new AppIconProvider(), new OperationLog(), TimeProvider.System));
+        return (monitor, controller, new MainViewModel(controller, monitor, new AppIconProvider(), new OperationLog(), TimeProvider.System, defaultOutput: controller));
     }
 
     private static AudioSession Session(string device, string instance, string name, float level, AudioSessionState state = AudioSessionState.Active,
@@ -479,9 +541,20 @@ public sealed class DesktopViewModelTests
     }
 
     /// <summary>只负责写入；写入同步修改假监听的状态，但不自动推送通知，由测试显式模拟系统回传。</summary>
-    private sealed class FakeController(FakeMonitor monitor) : IAudioController
+    private sealed class FakeController(FakeMonitor monitor) : IAudioController, IDefaultAudioOutputController
     {
         private readonly Queue<TaskCompletionSource> heldWrites = new();
+        public List<string> DefaultWrites { get; } = [];
+        public TaskCompletionSource? DefaultGate { get; set; }
+        public Exception? DefaultFailure { get; set; }
+        public bool IgnoreDefaultWrites { get; set; }
+        public async Task SetDefaultOutputDeviceAsync(string deviceId, CancellationToken cancellationToken = default)
+        {
+            DefaultWrites.Add(deviceId);
+            if (DefaultGate is { } pending) await pending.Task.WaitAsync(cancellationToken);
+            if (DefaultFailure is { } failure) throw failure;
+            if (!IgnoreDefaultWrites) monitor.SetDefault(deviceId);
+        }
 
         public List<(AudioSessionKey Key, float Level)> Writes { get; } = [];
         public List<(AudioSessionKey Key, bool Muted)> MuteWrites { get; } = [];
