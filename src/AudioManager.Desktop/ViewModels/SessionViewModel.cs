@@ -40,6 +40,8 @@ public sealed class SessionViewModel : ObservableObject
     public event EventHandler? Unavailable;
 
     public AudioSessionKey Key { get; }
+    internal Task? VolumeEditStarted { get; set; }
+    internal Task WaitForVolumeAsync() => volumeWriter.WhenIdleAsync();
     public ICommand ToggleMuteCommand { get; }
     public bool CanControl => controlStatus is null;
     public string? ControlStatus => controlStatus;
@@ -130,10 +132,17 @@ public sealed class SessionViewModel : ObservableObject
         if (!isMuteChanging) IsMuted = value.IsMuted;
     }
 
+    internal void AcceptRestoreReadback(AudioVolume value)
+    {
+        echoGuard.Wrote(value.Level);
+        ApplyVolume(value, isExternal: true);
+    }
+
     private async Task WriteVolumeAsync(float level)
     {
         try
         {
+            if (VolumeEditStarted is { } started) await started;
             var result = await controller.SetSessionVolumeAsync(Key, level);
             echoGuard.Wrote(result.Level);
             if (!volumeWriter.HasQueuedValue)

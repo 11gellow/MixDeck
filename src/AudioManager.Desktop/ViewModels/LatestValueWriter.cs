@@ -8,6 +8,8 @@ internal sealed class LatestValueWriter<T>
     private readonly Func<T, Task> write;
     private T pending = default!;
     private bool hasPending;
+    private TaskCompletionSource? idle;
+    public Task WhenIdleAsync() => idle?.Task ?? Task.CompletedTask;
 
     public LatestValueWriter(Func<T, Task> write) => this.write = write;
 
@@ -24,6 +26,7 @@ internal sealed class LatestValueWriter<T>
         if (IsActive) return;
 
         IsActive = true;
+        idle = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
             while (hasPending)
@@ -33,6 +36,6 @@ internal sealed class LatestValueWriter<T>
                 await write(next);
             }
         }
-        finally { IsActive = false; }
+        finally { IsActive = false; idle.TrySetResult(); idle = null; }
     }
 }

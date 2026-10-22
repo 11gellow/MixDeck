@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Diagnostics.CodeAnalysis;
 using AudioManager.Core.Models;
@@ -30,11 +31,38 @@ public static class ConfigurationJson
         if (document.RootElement.TryGetProperty("version", out var version))
             Require(version.ValueKind == JsonValueKind.Number && version.TryGetInt32(out _), "配置版本必须是整数。");
         if (document.RootElement.TryGetProperty("version", out version) && version.TryGetInt32(out var number)
-            && number != AudioConfiguration.CurrentVersion)
+            && number != 1 && number != AudioConfiguration.CurrentVersion)
             throw new UnsupportedConfigurationVersionException(number);
+        var legacy = version.ValueKind == JsonValueKind.Number && version.GetInt32() == 1;
+        if (legacy)
+        {
+            Require(!document.RootElement.TryGetProperty("deviceProfiles", out _), "版本 1 不支持设备方案映射。");
+            var node = JsonNode.Parse(json)!.AsObject();
+            if (node["settings"] is JsonObject settings)
+            {
+                if (settings.TryGetPropertyValue("automaticRestoreEnabled", out var enabled))
+                    Require(enabled is JsonValue flag && flag.TryGetValue<bool>(out _), "旧自动恢复设置必须是布尔值。");
+                settings.Remove("automaticRestoreEnabled");
+            }
+            node["version"] = AudioConfiguration.CurrentVersion;
+            node["deviceProfiles"] = new JsonArray();
+            json = node.ToJsonString();
+        }
         var value = JsonSerializer.Deserialize<AudioConfiguration>(json, Options)
             ?? throw new InvalidDataException("配置不能为空。");
         Validate(value);
+        if (legacy)
+        {
+            value = value with { DeviceProfiles = value.KnownDevices.Select(device =>
+            {
+                bool ContainsDevice(AudioProfile profile) => profile.Rules.Any(rule => string.Equals(rule.Target.Target.DeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+                    || profile.Snapshot.Entries.Any(entry => string.Equals(entry.Target.DeviceId, device.Id, StringComparison.OrdinalIgnoreCase));
+                var profile = value.Profiles.FirstOrDefault(profile => profile.Id == value.ActiveProfileId && ContainsDevice(profile))
+                    ?? value.Profiles.FirstOrDefault(ContainsDevice);
+                return profile is null ? null : new DeviceProfileSelection(device.Id, profile.Id);
+            }).OfType<DeviceProfileSelection>().ToArray() };
+            Validate(value);
+        }
         return value;
     }
 
@@ -43,7 +71,8 @@ public static class ConfigurationJson
         if (configuration.Version != AudioConfiguration.CurrentVersion)
             throw new UnsupportedConfigurationVersionException(configuration.Version);
         Require(configuration.Settings is not null && configuration.Profiles is not null
-            && configuration.KnownApplications is not null && configuration.KnownDevices is not null, "配置缺少必需集合或设置。");
+            && configuration.KnownApplications is not null && configuration.KnownDevices is not null
+            && configuration.DeviceProfiles is not null, "配置缺少必需集合或设置。");
         var profileIds = new HashSet<Guid>();
         var devices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var apps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -78,6 +107,14 @@ public static class ConfigurationJson
             }
         }
         Require(configuration.ActiveProfileId is null || profileIds.Contains(configuration.ActiveProfileId.Value), "当前方案不存在。");
+        var selectedDevices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var selection in configuration.DeviceProfiles!)
+        {
+            Require(selection is not null && devices.Contains(selection.DeviceId) && selectedDevices.Add(selection.DeviceId), "设备方案引用未知或重复设备。");
+            var profile = configuration.Profiles.FirstOrDefault(profile => profile.Id == selection!.ProfileId);
+            Require(profile is not null && (profile.Rules.Any(rule => string.Equals(rule.Target.Target.DeviceId, selection!.DeviceId, StringComparison.OrdinalIgnoreCase))
+                || profile.Snapshot.Entries.Any(entry => string.Equals(entry.Target.DeviceId, selection!.DeviceId, StringComparison.OrdinalIgnoreCase))), "设备方案不存在或不包含该输出设备。");
+        }
     }
 
     public static string IdentityKey(ApplicationIdentity identity) => $"{identity.Kind}:{identity.Value}";

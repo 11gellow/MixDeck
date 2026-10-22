@@ -17,8 +17,8 @@ public sealed class ConfigurationStoreTests : IDisposable
         var profile = new AudioProfile(Guid.NewGuid(), "工作", new(DateTimeOffset.UtcNow, [entry]), [new(Guid.NewGuid(), true, entry)]);
         return AudioConfiguration.Empty with
         {
-            Settings = new() { AutomaticRestoreEnabled = true, ShowUnavailableDevices = true },
-            KnownApplications = [app], KnownDevices = [new("device-a", "耳机")], Profiles = [profile], ActiveProfileId = profile.Id
+            Settings = new() { ShowUnavailableDevices = true },
+            KnownApplications = [app], KnownDevices = [new("device-a", "耳机")], Profiles = [profile], ActiveProfileId = profile.Id, DeviceProfiles = [new("device-a", profile.Id)]
         };
     }
 
@@ -72,7 +72,7 @@ public sealed class ConfigurationStoreTests : IDisposable
         var store = new JsonConfigurationStore(FilePath);
         var result = await store.LoadAsync();
         Assert.Equal(ConfigurationLoadKind.Blocked, result.Kind);
-        Assert.False(result.Configuration.Settings.AutomaticRestoreEnabled);
+        Assert.Empty(result.Configuration.DeviceProfiles);
         await Assert.ThrowsAsync<IOException>(() => store.SaveAsync(AudioConfiguration.Empty));
         Assert.Equal(original, await File.ReadAllTextAsync(FilePath));
         await store.ReplaceAsync(AudioConfiguration.Empty);
@@ -151,6 +151,41 @@ public sealed class ConfigurationStoreTests : IDisposable
         Assert.Equal(ConfigurationLoadKind.Blocked, (await store.LoadAsync()).Kind);
         await store.ReplaceAsync(AudioConfiguration.Empty);
         Assert.Equal(ConfigurationLoadKind.Loaded, (await store.LoadAsync()).Kind);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyConfigurationMigratesDeviceSelectionsAndKeepsOriginalAsBackupOnFirstSave(bool oldSwitch)
+    {
+        var sample = Sample();
+        var node = System.Text.Json.Nodes.JsonNode.Parse(ConfigurationJson.Serialize(sample))!.AsObject();
+        node["version"] = 1;
+        node.Remove("deviceProfiles");
+        node["settings"]!["automaticRestoreEnabled"] = oldSwitch;
+        var original = node.ToJsonString();
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(FilePath, original);
+        var store = new JsonConfigurationStore(FilePath);
+        var loaded = await store.LoadAsync();
+        Assert.Equal(ConfigurationLoadKind.Loaded, loaded.Kind);
+        Assert.Equal(2, loaded.Configuration.Version);
+        Assert.Equal(sample.ActiveProfileId, Assert.Single(loaded.Configuration.DeviceProfiles).ProfileId);
+        Assert.Equal(original, await File.ReadAllTextAsync(FilePath));
+        Assert.Equal(sample.Profiles[0].Snapshot, loaded.Configuration.Profiles[0].Snapshot with { Entries = sample.Profiles[0].Snapshot.Entries });
+        await store.SaveAsync(loaded.Configuration);
+        Assert.Equal(original, await File.ReadAllTextAsync(FilePath + ".bak"));
+        Assert.DoesNotContain("automaticRestoreEnabled", await File.ReadAllTextAsync(FilePath));
+    }
+
+    [Fact]
+    public void DeviceSelectionRejectsDuplicateUnknownAndIncompatibleReferences()
+    {
+        var sample = Sample();
+        var selection = sample.DeviceProfiles[0];
+        Assert.Throws<InvalidDataException>(() => ConfigurationJson.Serialize(sample with { DeviceProfiles = [selection, selection] }));
+        Assert.Throws<InvalidDataException>(() => ConfigurationJson.Serialize(sample with { DeviceProfiles = [selection with { ProfileId = Guid.NewGuid() }] }));
+        Assert.Throws<InvalidDataException>(() => ConfigurationJson.Serialize(sample with { KnownDevices = sample.KnownDevices.Append(new("device-b", "扬声器")).ToArray(), DeviceProfiles = [new("device-b", selection.ProfileId)] }));
     }
 
     public void Dispose()

@@ -37,7 +37,6 @@ public sealed partial class LiveAudioTests
             {
                 await savedService.InitializeAsync();
                 await savedService.SaveSnapshotAsync(state, "真实测试会话");
-                await savedService.UpdateSettingsAsync(savedService.Current.Settings with { AutomaticRestoreEnabled = true });
             }
             var savedJson = await File.ReadAllTextAsync(path);
             Assert.DoesNotContain("processId", savedJson);
@@ -94,18 +93,38 @@ public sealed partial class LiveAudioTests
                 && change.SessionKey == second.Key && change.EventContext == context);
             filtered = Filter(external.State, firstChild.Id, secondChild.Id);
             await service.HandleStateAsync(filtered, external with { State = filtered });
-            AssertNear(.37f, (await controller.GetSessionVolumeAsync(second.Key)).Level);
-            AssertNear(.37f, (await controller.GetSessionVolumeAsync(first.Key)).Level);
-            Assert.Equal(savedJson, await File.ReadAllTextAsync(path));
+            AssertNear(.23f, (await controller.GetSessionVolumeAsync(second.Key)).Level);
+            AssertNear(.23f, (await controller.GetSessionVolumeAsync(first.Key)).Level);
+            var persisted = ConfigurationJson.Deserialize(await File.ReadAllTextAsync(path));
+            AssertNear(.23f, persisted.Profiles[0].Rules.Single(rule => rule.Target.Target.Application is not null).Target.Volume.Level);
+            AssertNear(.37f, persisted.Profiles[0].Snapshot.Entries.Single().Volume.Level);
 
-            await service.UpdateSettingsAsync(service.Current.Settings with { AutomaticRestoreEnabled = false });
             var disabledContext = Guid.NewGuid();
             await native.InvokeAsync(() => SessionVolumeWriter.SetVolume(second.Key, .19f, disabledContext), default);
             var disabled = await ReadStateChange(changes, change => change.SessionKey == second.Key && change.EventContext == disabledContext);
             filtered = Filter(disabled.State, firstChild.Id, secondChild.Id);
             await service.HandleStateAsync(filtered, disabled with { State = filtered });
             AssertNear(.19f, (await controller.GetSessionVolumeAsync(second.Key)).Level);
-            output.WriteLine("新 PID/实例迟启动会话自动 0.37/true；真实外部 0.23 → 自动恢复 0.37；停用后外部 0.19 保持；实时事件不覆盖保存快照。");
+            AssertNear(.19f, (await controller.GetSessionVolumeAsync(first.Key)).Level);
+            AssertNear(.19f, ConfigurationJson.Deserialize(await File.ReadAllTextAsync(path)).Profiles[0].Rules.Single(rule => rule.Target.Target.Application is not null).Target.Volume.Level);
+            output.WriteLine("新 PID/实例迟启动会话自动 0.37/true；真实外部 0.23 → 自动保存并统一所有会话；再次调节 0.19 保持并保存；原始快照不变。");
+
+            var edit = await service.BeginVolumeEditAsync(device.Id, second.Key);
+            var beforeDrag = await File.ReadAllTextAsync(path);
+            foreach (var level in new[] { .31f, .47f })
+            {
+                var dragContext = Guid.NewGuid();
+                await native.InvokeAsync(() => SessionVolumeWriter.SetVolume(second.Key, level, dragContext), default);
+                var change = await ReadStateChange(changes, change => change.SessionKey == second.Key && change.EventContext == dragContext);
+                filtered = Filter(change.State, firstChild.Id, secondChild.Id);
+                await service.HandleStateAsync(filtered, change with { State = filtered });
+                AssertNear(level, (await controller.GetSessionVolumeAsync(second.Key)).Level);
+                Assert.Equal(beforeDrag, await File.ReadAllTextAsync(path));
+            }
+            await service.EndVolumeEditAsync(edit);
+            AssertNear(.47f, ConfigurationJson.Deserialize(await File.ReadAllTextAsync(path)).Profiles[0].Rules.Single(rule => rule.Target.Target.Application is not null).Target.Volume.Level);
+            AssertNear(.47f, (await controller.GetSessionVolumeAsync(first.Key)).Level);
+            output.WriteLine("真实音量及回调 0.31 → 0.47 在编辑范围内实时生效，磁盘保持原样；结束编辑后保存最终 0.47 并统一同路径会话。");
         }
         finally
         {

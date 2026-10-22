@@ -44,7 +44,7 @@ public partial class App : Application
             .BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
 
         MainWindow = services.GetRequiredService<MainWindow>();
-        lifetime = new DesktopLifetime(ShowMainWindow, MainWindow.Hide, () => Shutdown());
+        lifetime = new DesktopLifetime(ShowMainWindow, MainWindow.Hide, () => _ = ShutdownAfterFlushAsync());
         try
         {
             tray = new SystemTrayIcon(Dispatcher, lifetime.ShowWindow, lifetime.RequestExit,
@@ -96,6 +96,12 @@ public partial class App : Application
 
     private void OnSessionEnding(object sender, SessionEndingCancelEventArgs e) => lifetime?.PrepareSessionEnd();
     private void OnExitRequested(object? sender, EventArgs e) => lifetime?.RequestExit();
+
+    private async Task ShutdownAfterFlushAsync()
+    {
+        if (MainWindow is MainWindow main) await main.PrepareToLeaveAsync();
+        Shutdown();
+    }
 
     protected override void OnExit(ExitEventArgs e)
     {
