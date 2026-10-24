@@ -34,6 +34,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool suppressSelection;
     private bool isConsuming;
     private bool disposed;
+    private bool startupRecoveryScheduled;
+    internal TimeSpan[] StartupRetryDelays { get; set; } =
+        [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
+    internal Task StartupRecoveryTask { get; private set; } = Task.CompletedTask;
     private DeviceItemViewModel? selectedDevice;
     private bool showUnavailableDevices;
     private bool isLoading;
@@ -233,6 +237,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             ShowUnavailableDevices = Configuration.Service.Current.Settings.ShowUnavailableDevices;
         }
         await RefreshCommand.ExecuteAsync();
+        if (!disposed && runtimeState is not { IsRunning: true } && !startupRecoveryScheduled)
+        {
+            startupRecoveryScheduled = true;
+            StartupRecoveryTask = RecoverStartupAsync();
+        }
+    }
+
+    private async Task RecoverStartupAsync()
+    {
+        // 仅首次启动失败时有限退避，不轮询音量；成功或退出立即结束。
+        try
+        {
+            foreach (var delay in StartupRetryDelays)
+            {
+                await Task.Delay(delay, time, lifetime.Token);
+                if (disposed || runtimeState is { IsRunning: true }) return;
+                Log.Info("音频监听尚未启动，自动重试初始化", "启动恢复");
+                await RefreshCommand.ExecuteAsync();
+                if (disposed || runtimeState is { IsRunning: true }) return;
+            }
+            if (!disposed) Log.Warning("启动自动重试已结束；请打开窗口点击刷新，查看具体失败原因", "启动恢复");
+        }
+        catch (OperationCanceledException) when (disposed || lifetime.IsCancellationRequested) { }
     }
 
     private void OnConfigurationChanged()

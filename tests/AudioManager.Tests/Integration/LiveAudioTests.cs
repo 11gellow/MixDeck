@@ -139,6 +139,26 @@ public sealed partial class LiveAudioTests(ITestOutputHelper output)
     }
 
     [LiveAudioFact]
+    public async Task SessionMetadataDiagnosticsKeepReadableSessionsAvailable()
+    {
+        using var controller = Create();
+        var device = await RequireDefault(controller);
+        var result = await controller.EnumerateSessionsAsync(device.Id);
+        foreach (var issue in result.Issues)
+        {
+            var session = result.Items.FirstOrDefault(item => item.Key.InstanceId == issue.ItemId);
+            output.WriteLine($"读取警告：应用={session?.Name ?? "未枚举"}；PID={session?.ProcessId}；路径={session?.ProcessPath ?? "不可读"}；错误={issue.Message}");
+        }
+        Assert.Equal(result.Items.Count, result.Items.Select(item => item.Key).Distinct().Count());
+        foreach (var session in result.Items)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(session.Key.InstanceId));
+            Assert.InRange(session.Volume.Level, 0f, 1f);
+        }
+        output.WriteLine($"只读枚举：{result.Items.Count} 个会话，{result.Issues.Count} 项警告；未写入音量或配置。");
+    }
+
+    [LiveAudioFact]
     public async Task MasterVolumeCanBeWrittenReadBackAndRestored()
     {
         using var controller = Create();

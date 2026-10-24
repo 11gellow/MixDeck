@@ -2,11 +2,11 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:views="clr-namespace:AudioManager.Desktop.Views">
 
-    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F0F3FA" />
     <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="CardBorderBrush" Color="#E3E3E3" />
-    <SolidColorBrush x:Key="AccentBrush" Color="#0067C0" />
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="#1975C5" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#5657C8" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#4345AC" />
     <SolidColorBrush x:Key="TrackBrush" Color="#C8C8C8" />
     <SolidColorBrush x:Key="PrimaryTextBrush" Color="#1B1B1B" />
     <SolidColorBrush x:Key="SecondaryTextBrush" Color="#616161" />
@@ -36,7 +36,7 @@
         <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="CornerRadius" Value="18" />
         <Setter Property="Padding" Value="16,12" />
     </Style>
 
@@ -69,12 +69,15 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="6">
+                    <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="6" BorderThickness="1" BorderBrush="Transparent">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Root" Property="Background" Value="{StaticResource HoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Root" Property="Background" Value="{StaticResource PressedBrush}" />
@@ -174,7 +177,8 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Slider">
-                    <Grid Height="24" Background="Transparent">
+                    <Grid Height="28" Background="Transparent">
+                        <Border x:Name="FocusRing" CornerRadius="8" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Visibility="Collapsed" IsHitTestVisible="False" />
                         <Track x:Name="PART_Track">
                             <Track.DecreaseRepeatButton>
                                 <RepeatButton Command="Slider.DecreaseLarge" Style="{StaticResource SliderFillStyle}" />
@@ -188,6 +192,9 @@
                         </Track>
                     </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="Visibility" Value="Visible" />
+                        </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4" />
                         </Trigger>
@@ -197,4 +204,64 @@
         </Setter>
     </Style>
 
+    <Style TargetType="Button">
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="MinHeight" Value="34" />
+        <Setter Property="Background" Value="White" />
+        <Setter Property="BorderBrush" Value="#DDE4F1" />
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="Button">
+                <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="#EDF0FF" /></Trigger>
+                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Background" Value="#DDE3FF" /></Trigger>
+                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="{StaticResource AccentBrush}" /></Trigger>
+                    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+    <Style TargetType="TextBox">
+        <Setter Property="Padding" Value="7,4" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Background" Value="#F8FAFF" />
+        <Setter Property="BorderBrush" Value="#DDE4F1" />
+        <Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" /></Trigger></Style.Triggers>
+    </Style>
+    <Style TargetType="TabItem">
+        <Setter Property="Padding" Value="24,10" />
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="TabItem">
+                <Border x:Name="Pill" CornerRadius="12" Margin="3" Padding="{TemplateBinding Padding}" Background="Transparent" BorderBrush="Transparent" BorderThickness="1">
+                    <ContentPresenter x:Name="TabLabel" ContentSource="Header" TextElement.FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="Background" Value="#E4E9F8" /></Trigger>
+                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="Pill" Property="Background" Value="White" /><Setter TargetName="TabLabel" Property="TextElement.Foreground" Value="{StaticResource AccentBrush}" /></Trigger>
+                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{StaticResource AccentBrush}" /></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+    <Style TargetType="TabControl">
+        <Setter Property="Template"><Setter.Value>
+            <ControlTemplate TargetType="TabControl">
+                <Grid KeyboardNavigation.TabNavigation="Local">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <Border Background="#E5EAF6" CornerRadius="16" HorizontalAlignment="Left" Margin="0,0,0,8">
+                        <TabPanel IsItemsHost="True" />
+                    </Border>
+                    <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Row="1" ContentSource="SelectedContent" />
+                </Grid>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+    <Style TargetType="DataGridColumnHeader">
+        <Setter Property="Background" Value="#EAF0FA" />
+        <Setter Property="Padding" Value="8,10" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
 </ResourceDictionary>

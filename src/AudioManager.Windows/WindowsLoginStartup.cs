@@ -12,7 +12,9 @@ public sealed class WindowsLoginStartup(string executablePath, string valueName 
         get
         {
             using var key = Registry.CurrentUser.OpenSubKey(runKey, false);
-            return key?.GetValue(valueName) is string command && !string.IsNullOrWhiteSpace(command);
+            // 旧安装路径或缺失托盘参数不能证明当前程序已正确注册。
+            return key?.GetValue(valueName) is string command
+                && string.Equals(command.Trim(), Command, StringComparison.OrdinalIgnoreCase);
         }
     }
 
