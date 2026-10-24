@@ -351,6 +351,8 @@ public sealed class DesktopViewModelTests
     public async Task StartFailureIsReportedAndRefreshRetriesStart()
     {
         var (monitor, _, viewModel) = Create(Session(DeviceA, "a", "Alpha", 0.5f));
+        using var owned = viewModel;
+        viewModel.StartupRetryDelays = [TimeSpan.FromMilliseconds(100)];
         monitor.StartFailure = new AudioControlException(AudioErrorCode.ApiFailure, "启动实时音频监听", "启动实时音频监听失败。");
 
         await viewModel.InitializeAsync();
@@ -363,6 +365,44 @@ public sealed class DesktopViewModelTests
         Assert.Equal(2, monitor.StartCount);
         Assert.Equal(SyncState.Live, viewModel.SyncState);
         Assert.Single(viewModel.Sessions);
+        await viewModel.StartupRecoveryTask.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(2, monitor.StartCount);
+        Assert.Equal(0, monitor.RefreshCount);
+    }
+
+    [Fact]
+    public async Task StartupRecoversWithoutManualRefreshWhenAudioBecomesReady()
+    {
+        var (monitor, _, viewModel) = Create(Session(DeviceA, "a", "Alpha", .5f));
+        using var owned = viewModel;
+        viewModel.StartupRetryDelays = [TimeSpan.FromMilliseconds(50)];
+        monitor.StartFailure = new InvalidOperationException("Audio service not ready");
+        await viewModel.InitializeAsync();
+        monitor.StartFailure = null;
+        await viewModel.StartupRecoveryTask.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(SyncState.Live, viewModel.SyncState);
+        Assert.Equal(2, monitor.StartCount);
+        Assert.Single(viewModel.Sessions);
+    }
+
+    [Fact]
+    public async Task StartupRetriesAreBoundedAndDisposeCancelsPendingRetry()
+    {
+        var (monitor, _, vm) = Create();
+        using var owned = vm;
+        vm.StartupRetryDelays = [TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10)];
+        monitor.StartFailure = new InvalidOperationException("Unavailable");
+        await vm.InitializeAsync();
+        await vm.StartupRecoveryTask.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(3, monitor.StartCount);
+        Assert.Equal(SyncState.Offline, vm.SyncState);
+        var (otherMonitor, _, other) = Create();
+        other.StartupRetryDelays = [TimeSpan.FromSeconds(30)];
+        otherMonitor.StartFailure = new InvalidOperationException("Unavailable");
+        await other.InitializeAsync();
+        other.Dispose();
+        await other.StartupRecoveryTask.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, otherMonitor.StartCount);
     }
 
     [Fact]

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <Grid Margin="18">
+    <Grid Margin="0,12,0,0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -13,10 +13,22 @@
         <StackPanel>
             <TextBlock x:Name="FocusAnchor" Text="高级选项" FontSize="22" FontWeight="SemiBold" Focusable="True" />
             <TextBlock Margin="0,4,0,8" Text="按输出设备记住方案，切换默认输出时自动应用。前端和系统的音量调节都会自动保存；原始快照保留。" TextWrapping="Wrap" />
-            <TextBlock Text="{Binding CurrentDeviceName, StringFormat=管理设备：{0}}" Margin="0,0,0,4" />
-            <TextBlock Text="{Binding CurrentProfileName, StringFormat=当前方案：{0}}" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding CurrentDeviceName, StringFormat=管理设备：{0}}" Margin="0,0,0,4" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding CurrentProfileName, StringFormat=当前方案：{0}}" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <Border Background="#FFF6DF" CornerRadius="10" Padding="10,6" Margin="0,8,0,0">
+                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{StaticResource WarningBrush}" AutomationProperties.Name="配置操作结果" />
+            </Border>
         </StackPanel>
         <StackPanel Grid.Row="1" Margin="0,12,0,10">
+            <Border Style="{StaticResource CardStyle}" Padding="12,10" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="常用偏好" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8" />
+                    <WrapPanel>
+                        <CheckBox Content="登录后启动到托盘" IsChecked="{Binding StartAtLogin}" Margin="0,0,16,4" />
+                        <CheckBox Content="显示不可用设备" IsChecked="{Binding ShowUnavailableDevices}" Margin="0,0,0,4" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
             <WrapPanel>
                 <Button Content="导入" Command="{Binding ImportCommand}" Padding="10,4" Margin="0,0,8,6" />
                 <Button Content="导出" Command="{Binding ExportCommand}" Padding="10,4" Margin="0,0,8,6" />
@@ -28,7 +40,7 @@
                 <Button Content="手动恢复快照" Command="{Binding RestoreCommand}" Padding="10,4" Margin="0,0,8,6" />
                 <Button Content="删除方案" Command="{Binding DeleteCommand}" Padding="10,4" Margin="0,0,0,6" />
             </WrapPanel>
-            <TextBlock Text="{Binding SelectedProfileDetails}" FontSize="12" Foreground="{StaticResource SecondaryTextBrush}" />
+            <TextBlock Text="{Binding SelectedProfileDetails}" FontSize="12" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" />
         </StackPanel>
         <Grid Grid.Row="2">
             <Grid.RowDefinitions>
@@ -42,7 +54,7 @@
             </DockPanel>
             <DataGrid Grid.Row="1" ItemsSource="{Binding Rules}" AutoGenerateColumns="False" CanUserAddRows="False"
                       CanUserDeleteRows="False" CanUserSortColumns="False" HeadersVisibility="Column"
-                      RowHeaderWidth="0" RowHeight="30" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E5E5"
+                      RowHeaderWidth="0" RowHeight="38" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EDF0F7" BorderThickness="0" Background="White" AlternatingRowBackground="#F7F9FE"
                       Height="240" MinHeight="80" EnableRowVirtualization="True" AutomationProperties.Name="方案恢复规则">
                 <DataGrid.Resources>
                     <Style TargetType="TextBlock">
@@ -63,18 +75,13 @@
                     <DataGridTemplateColumn Header="静音" Width="48"><DataGridTemplateColumn.CellTemplate><DataTemplate>
                         <CheckBox IsChecked="{Binding IsMuted, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
-                    <DataGridTextColumn Header="应用匹配（完整路径）" Binding="{Binding Match}" IsReadOnly="True" Width="*" />
+                    <DataGridTextColumn Header="应用匹配（完整路径）" Binding="{Binding Match}" IsReadOnly="True" Width="*" MinWidth="160" />
                     <DataGridTextColumn Header="输出设备" Binding="{Binding DeviceName}" IsReadOnly="True" Width="130" />
                 </DataGrid.Columns>
             </DataGrid>
             <StackPanel Grid.Row="2" Margin="0,10,0,0">
                 <TextBlock Text="直接在主界面或系统中调节音量即可自动保存。启动、切换设备和新会话出现时自动恢复，不锁定滑块。系统拒绝修改时显示实际值并停止重试，可点击主窗口“刷新”重试。" TextWrapping="Wrap" FontSize="12" />
-                <WrapPanel Margin="0,8,0,0">
-                    <CheckBox Content="登录后启动到托盘" IsChecked="{Binding StartAtLogin}" Margin="0,0,16,8" />
-                    <CheckBox Content="显示不可用设备" IsChecked="{Binding ShowUnavailableDevices}" Margin="0,0,0,8" />
-                </WrapPanel>
             </StackPanel>
-            <TextBlock Grid.Row="3" Text="{Binding Status}" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{StaticResource WarningBrush}" AutomationProperties.Name="配置操作结果" />
         </Grid>
         <TextBlock Grid.Row="3" Text="{Binding ConfigurationPath}" TextWrapping="Wrap" Margin="0,10,0,0" FontSize="11"
                    Foreground="{StaticResource SecondaryTextBrush}" ToolTip="配置文件位置；备份位于同目录" />

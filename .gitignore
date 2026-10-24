@@ -33,3 +33,6 @@ coverage.opencover.xml
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# 辅助AI工具生成的文件
+./docs/

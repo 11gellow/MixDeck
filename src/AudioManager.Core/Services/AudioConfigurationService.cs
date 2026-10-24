@@ -134,7 +134,7 @@ public sealed class AudioConfigurationService(IConfigurationStore store, IAudioC
                 Target = rule.Target with { Volume = new(level ?? rule.Target.Volume.Level, muted ?? rule.Target.Volume.IsMuted) } };
             return current with { Profiles = current.Profiles.Select(item => item.Id == profileId
                 ? item with { Rules = item.Rules.Select(item => item.Id == ruleId ? updated : item).ToArray() } : item).ToArray() };
-        }, applyDevice: deviceId, changedProfile: profileId);
+        }, applyDevice: deviceId, changedProfile: profileId, changedRule: ruleId);
 
     public Task UpdateSettingAsync(bool? startAtLogin = null, bool? showUnavailableDevices = null)
         => ChangeAsync(current => current with { Settings = current.Settings with {
@@ -199,17 +199,24 @@ public sealed class AudioConfigurationService(IConfigurationStore store, IAudioC
     }
 
     private async Task ChangeAsync(Func<AudioConfiguration, AudioConfiguration> update, bool replace = false,
-        string? applyDevice = null, Guid? applyProfile = null, bool applyAll = false, Guid? changedProfile = null)
+        string? applyDevice = null, Guid? applyProfile = null, bool applyAll = false, Guid? changedProfile = null, Guid? changedRule = null)
     {
         await gate.WaitAsync(lifetime.Token);
         try
         {
             await PersistAsync(update(Current), replace);
-            failedAutomaticTargets.Clear();
+            // 单字段编辑不能解除其他对象的失败保护，或重新应用其他目标。
+            if (changedRule is null) failedAutomaticTargets.Clear();
             if (latestState is { IsRunning: true } state)
                 foreach (var selection in Current.DeviceProfiles.Where(item => (changedProfile is null || item.ProfileId == changedProfile)
                     && (applyAll || SameDevice(item.DeviceId, applyDevice) || item.ProfileId == applyProfile)))
-                    await ApplyEntriesAsync(state, DeviceTargets(selection.DeviceId), automatic: true);
+                {
+                    var targets = changedRule is { } ruleId
+                        ? ProfileForDevice(selection.DeviceId)!.Rules.Where(rule => rule.Id == ruleId && rule.Enabled
+                            && SameDevice(rule.Target.Target.DeviceId, selection.DeviceId)).Select(rule => rule.Target)
+                        : DeviceTargets(selection.DeviceId);
+                    await ApplyEntriesAsync(state, targets, automatic: true);
+                }
         }
         finally { gate.Release(); }
     }
@@ -328,13 +335,13 @@ public sealed class AudioConfigurationService(IConfigurationStore store, IAudioC
         var session = change.Kind == AudioStateChangeKind.SessionVolumeChanged ? device.Sessions.FirstOrDefault(session => session.Key == change.SessionKey) : null;
         if (change.Kind == AudioStateChangeKind.SessionVolumeChanged && (session is null || session.State == AudioSessionState.Expired)) return;
         var identity = session is null ? null : AudioIdentityMatcher.Identify(session);
-        var editingKey = ConfigurationJson.TargetKey(new(device.Device.Id, identity));
-        if (volumeEdits.Values.Any(edit => edit.TargetKey.Equals(editingKey, StringComparison.OrdinalIgnoreCase))) return;
         if (session is not null && identity is null)
         {
             Reported?.Invoke(new(session.Name, false, "程序完整路径不可读，当前音量已保留但不能自动保存身份。"));
             return;
         }
+        var editingKey = ConfigurationJson.TargetKey(new(device.Device.Id, identity));
+        if (volumeEdits.Values.Any(edit => edit.TargetKey.Equals(editingKey, StringComparison.OrdinalIgnoreCase))) return;
         var key = session is null ? AudioWriteGuard.MasterKey(device.Device.Id) : AudioWriteGuard.SessionKey(session.Key);
         if (failedAutomaticTargets.Contains(key) || (controller as AudioWriteGuard)?.Restriction(key) is not null) return;
         var actual = session is null ? await controller.GetMasterVolumeAsync(device.Device.Id, lifetime.Token)

@@ -233,6 +233,8 @@ Invoke-CimMethod -Namespace root/default -ClassName StdRegProv -MethodName GetSt
 
 ## S4-13：隐式保存与同级高级选项（2026-10-22）
 
+后续并发修复与最新回归见文末 S4-14，以下保留原验收证据。
+
 ### 已确认行为和实现
 
 - 用户明确取消手动保存、手动新建方案和长期规则草稿，主窗口采用“音量管理”“高级选项”两个同级页签。保留已有/导入方案、导入导出、快照恢复及删除；选中方案立即保存绑定并应用。新设备自动建立默认方案和原始快照，后续目标变化不改快照，JSON 仍为 v2。
@@ -257,3 +259,38 @@ dotnet test tests/AudioManager.Tests/AudioManager.Tests.csproj --configuration D
 - 首轮完整实机测试时旧版程序仍后台运行，出现原生事件上下文、多会话音量和通知等待失败；第二次尝试退出未成功，仍有失败，不属于隔离验收。通过实际窗口“退出程序”正常退出并核对进程消失后，隔离回归通过；最终标准路径 189 项再次全通过。实机测试前必须正常退出其他 MixDeck 实例，避免它按同路径规则同步测试会话。
 - 实际界面已显示同级页签及高级选项中的规则输入/开关，原保存与新建按钮不存在；规则输入 15→14 并切页后主页面实际显示 14%，随后恢复 15%。最终通过普通 Explorer 双击标准路径 exe 启动，保留真实用户环境原设备方案（原快照时间 2026-10-22 18:48:17），主音量 15%/未静音。开发工具直接启动使用独立私有视图，仅作界面验证，没有用其配置覆盖真实用户文件，也没有更改登录启动设置。
 - 鼠标长按过程的每一帧没有通过桌面自动化逐帧采样；中间值不保存和收尾依据组件与真实音频事件测试。真实重启、注销、Windows 10、物理拔插和长期驻留未执行，继续保留对应验证缺口。
+
+## S4-14：隐式保存并发收尾（2026-10-24）
+
+- 本轮复用已实现的同级页签、无保存按钮、逐字段更新和滑块收尾，不扩展阶段 5、不改变 JSON v2 和原始快照。
+- 回归先复现：应用保存目标 40%/未静音，系统已变为 73%/静音但通知未消费；编辑主音量为 25% 后，旧代码整设备恢复将应用覆盖为旧值。现在只应用被编辑规则，保留应用实际值，随后通知正确保存。单规则更新也不解除其他目标的失败保护。
+- 严格构建：`dotnet build AudioManager.sln --configuration Debug --no-restore --nologo --warnaserror`，0 警告、0 错误。
+- 测试前确认无 Desktop 进程。设置 `AUDIO_MANAGER_RUN_INTEGRATION_TESTS=1` 后执行 `dotnet test tests/AudioManager.Tests/AudioManager.Tests.csproj --configuration Debug --no-build --nologo --logger "trx;LogFileName=implicit-save-followup.trx" --results-directory tests/AudioManager.Tests/TestResults`，190/190 通过（179 单元/组件、11 真实音频），0 失败/跳过。
+- 真实音频用例恢复原 Console/Multimedia 角色、主音量/静音和测试会话，并回读验证。配置测试使用临时文件；WPF 组件测试加载真实 XAML，验证页签和输入路由。本轮未重复人工窗口操作、未改用户登录设置、未重启、未提交或发布。S4-09 及跨系统兼容缺口不变。
+
+## S4-15 与本轮最终回归（2026-10-24）
+
+- 新增 RejectedRuleWriteKeepsFailureVisibleInsteadOfSuccessMessage：系统忽略 23% 写入、实际仍为 50% 时，旧界面只显示“规则已自动保存”；修复后保留系统拒绝原因和实际回读。串行操作结束保留本次失败报告，不改变持久化与原目标语义。
+- 标准路径命令：dotnet build AudioManager.sln --configuration Debug --no-restore --nologo --warnaserror，0 警告/错误。
+- 正常退出 Desktop 后设置 AUDIO_MANAGER_RUN_INTEGRATION_TESTS=1，执行 dotnet test tests/AudioManager.Tests/AudioManager.Tests.csproj --configuration Debug --no-build --nologo --logger "trx;LogFileName=goal-final.trx" --results-directory tests/AudioManager.Tests/TestResults：191/191 通过（180 单元/组件、11 真实音频），0 失败/跳过。实机用例原设备、主音量及会话恢复断言通过。
+- 最终标准路径程序已启动并截图检查主页面，先前隔离构建状态不再适用。真实重启、跨 DPI 与跨系统仍未验证；本轮用户已收敛为适度功能修复和轻量 UI 优化，不把后续兼容验收写成已通过。
+
+## S4-16 启动恢复衔接验证（2026-10-24）
+
+命令：dotnet build AudioManager.sln --configuration Debug --no-restore --nologo --warnaserror；设置 AUDIO_MANAGER_RUN_INTEGRATION_TESTS=1 后运行 dotnet test tests/AudioManager.Tests/AudioManager.Tests.csproj --configuration Debug --no-build --nologo --logger "trx;LogFileName=startup-full.trx" --results-directory tests/AudioManager.Tests/TestResults。构建 0 警告/错误；194/194 通过，0 失败/跳过。测试前正常退出旧实例，真实测试恢复原设备、主音量及测试会话。
+
+首次启动失败后的重试已覆盖保存配置不被实时初值污染、主音量/会话目标恢复、UI 回读、唯一消费者、手动刷新先成功后不重复启动；持续失败有界、退出取消也已验证。系统 Win32_StartupCommand 确认标准 exe --tray，标准路径已更新并启动。真实系统重启尚未执行，已请求用户自行安排并反馈，不宣称稳定性目标全面完成。
+
+## S4-17：启动项误报启用（2026-10-24）
+
+隔离 Software/MixDeck.Tests 随机测试键复现旧可执行路径/缺少托盘参数仍返回 IsEnabled=true；修复后仅当前生成命令匹配（OrdinalIgnoreCase、Trim）返回 true。测试键 finally 清理，未修改真实用户 Run 项。标准严格构建通过；启用真实集成开关运行完整测试，startup-registration-full.trx：195/195、0 失败/跳过。测试前正常退出应用，测试恢复原设备和音量，最终标准路径已重新启动。真实登录验收仍未完成。
+
+## S4-18：不可读身份诊断（2026-10-24）
+
+只读真实测试 SessionMetadataDiagnosticsKeepReadableSessionsAvailable 返回 14 会话、1 警告：网易UU远程 PID 9932 路径不可读，拒绝访问；没有音量写入。新增 UnreadableApplicationChangeDuringMasterEditStillReportsUnsavedIdentity 回归先失败（报告集合为空），将身份校验提前到编辑键生成前后通过；未知应用不再与主音量共享 null 身份编辑判断。配置文件不变、实际 63%/静音保留，无应用规则误建。严格隔离构建通过，组件185通过/1跳过；真实重启和访问受限应用按路径恢复仍不宣称通过。
+
+### S4-18 最终标准路径回归
+
+后续启动证据核对（2026-10-24，只读）：Win32_OperatingSystem.LastBootUpTime 为 2026-10-23 20:41:31，标准 DLL 修改时间为 2026-10-24 18:03:51；新版尚无重启验证证据。Get-Process 与 Win32_Process 均未找到 Desktop 实例，退出原因未知。Win32_StartupCommand 中当前用户 MixDeck 路径与 --tray 正确；近一天 Application 事件 1000/1026 查询成功，8 条均无产品匹配。StdRegProv 读取真实用户 StartupApproved 返回非零，批准状态未验证；未更改注册表、重新启动程序或系统。此检查不替代真实登录验收，不新增功能通过结论。
+
+2026-10-24：正常退出旧实例后，执行 dotnet build AudioManager.sln --configuration Debug --no-restore --nologo --warnaserror，0 警告/错误；AUDIO_MANAGER_RUN_INTEGRATION_TESTS=1，dotnet test tests/AudioManager.Tests/AudioManager.Tests.csproj --configuration Debug --no-build --nologo --logger "trx;LogFileName=identity-full.trx" --results-directory tests/AudioManager.Tests/TestResults，197/197 通过（185 单元/组件、12 真实音频），0 失败/跳过。原设备与音量恢复断言通过。标准 exe 已更新并启动，实测界面实时同步、14 会话。路径访问拒绝限制仍存在，真实重启尚待反馈。

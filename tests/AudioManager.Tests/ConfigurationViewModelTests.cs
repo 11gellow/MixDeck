@@ -257,6 +257,26 @@ public sealed class ConfigurationViewModelTests
     }
 
     [Fact]
+    public void StartupStatusRejectsStaleExecutableOrMissingTrayArgument()
+    {
+        var path = @"Software\MixDeck.Tests\" + Guid.NewGuid().ToString("N");
+        try
+        {
+            var startup = new WindowsLoginStartup(@"C:\MixDeck\current.exe", "Test", path);
+            using var key = Registry.CurrentUser.CreateSubKey(path);
+            key.SetValue("Test", @"""C:\MixDeck\old.exe"" --tray");
+            Assert.False(startup.IsEnabled);
+            key.SetValue("Test", @"""C:\MixDeck\current.exe""");
+            Assert.False(startup.IsEnabled);
+            key.SetValue("Test", startup.Command.ToUpperInvariant());
+            Assert.True(startup.IsEnabled);
+            startup.SetEnabled(true);
+            Assert.Equal(startup.Command, key.GetValue("Test"));
+        }
+        finally { Registry.CurrentUser.DeleteSubKeyTree(path, false); }
+    }
+
+    [Fact]
     public async Task AdvancedOptionsLoadsInlineWithMainWindowTabsOnStaDispatcher()
     {
         using var scenario = await ConfigurationScenario.CreateAsync();
@@ -286,6 +306,24 @@ public sealed class ConfigurationViewModelTests
                 Assert.Equal("音量管理", ((System.Windows.Controls.TabItem)pages.Items[0]).Header);
                 Assert.Equal("高级选项", ((System.Windows.Controls.TabItem)pages.Items[1]).Header);
                 Assert.IsType<AudioManager.Desktop.Views.AdvancedOptionsView>(((System.Windows.Controls.TabItem)pages.Items[1]).Content);
+                var mixer = (System.Windows.Controls.ScrollViewer)window.FindName("MixerViewport");
+                mixer.Measure(new(580, 300));
+                mixer.Arrange(new(0, 0, 580, 300));
+                mixer.UpdateLayout();
+                Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
+                mixer.UpdateLayout();
+                Assert.True(((System.Windows.FrameworkElement)mixer.Content).ActualHeight >= 480);
+                Assert.True(mixer.ScrollableHeight > 0);
+                mixer.ScrollToBottom();
+                mixer.UpdateLayout();
+                Assert.True(mixer.VerticalOffset > 0);
+                mixer.Measure(new(820, 620));
+                mixer.Arrange(new(0, 0, 820, 620));
+                mixer.UpdateLayout();
+                Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
+                mixer.UpdateLayout();
+                Assert.InRange(mixer.ScrollableHeight, 0, 1);
+                Assert.InRange(((System.Windows.FrameworkElement)mixer.Content).ActualHeight, 600, 620);
                 pages.SelectedIndex = 1;
                 Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
                 window.UpdateLayout();
@@ -297,6 +335,25 @@ public sealed class ConfigurationViewModelTests
                 var grid = Descendants(advanced).OfType<System.Windows.Controls.DataGrid>().Single();
                 Assert.Equal(6, grid.Columns.Count);
                 Assert.Equal(2, grid.Items.Count);
+                // 最小窗口的内容区域：偏好必须在规则表之前，长路径仍可横向访问。
+                advanced.Measure(new(580, 330));
+                advanced.Arrange(new(0, 0, 580, 330));
+                advanced.UpdateLayout();
+                var startupToggle = Descendants(advanced).OfType<System.Windows.Controls.CheckBox>()
+                    .Single(box => Equals(box.Content, "登录后启动到托盘"));
+                Assert.True(startupToggle.TransformToAncestor(advanced).Transform(new()).Y
+                    < grid.TransformToAncestor(advanced).Transform(new()).Y);
+                Assert.True(grid.Columns[4].ActualWidth >= 160);
+                var scroll = Descendants(advanced).OfType<System.Windows.Controls.ScrollViewer>().First();
+                Assert.True(scroll.ScrollableHeight > 0);
+                scroll.ScrollToBottom();
+                advanced.UpdateLayout();
+                Assert.True(scroll.VerticalOffset > 0);
+                advanced.Measure(new(820, 700));
+                advanced.Arrange(new(0, 0, 820, 700));
+                scroll.ScrollToTop();
+                advanced.UpdateLayout();
+                Assert.Equal(System.Windows.FontWeights.Normal, advanced.FontWeight);
                 Assert.DoesNotContain(Descendants(advanced).OfType<System.Windows.Controls.Button>(), button => button.Content?.ToString()?.Contains("保存") == true);
                 using var inputSource = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("MixDeck test input") { Width = 1, Height = 1 });
                 var input = Descendants(advanced).OfType<System.Windows.Controls.TextBox>().First();
@@ -376,12 +433,25 @@ public sealed class ConfigurationViewModelTests
     }
     internal sealed class Monitor(ConfigurationScenario scenario) : IAudioStateMonitor
     {
-        public Task<AudioRuntimeState> StartAsync(CancellationToken cancellationToken = default) => Task.FromResult(scenario.State());
+        public int StartupFailuresRemaining { get; set; }
+        public int StartCount { get; private set; }
+        public int ConsumerCount { get; private set; }
+        public Task<AudioRuntimeState> StartAsync(CancellationToken cancellationToken = default)
+        {
+            StartCount++;
+            if (StartupFailuresRemaining > 0)
+            {
+                StartupFailuresRemaining--;
+                return Task.FromException<AudioRuntimeState>(new InvalidOperationException("音频服务尚未就绪"));
+            }
+            return Task.FromResult(scenario.State());
+        }
         public Task<AudioRuntimeState> RefreshAsync(CancellationToken cancellationToken = default) => Task.FromResult(scenario.State());
         public Task<AudioRuntimeState> GetStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(scenario.State());
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public async IAsyncEnumerable<AudioStateChanged> ReadChangesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            ConsumerCount++;
             await Task.Delay(Timeout.Infinite, cancellationToken);
             yield break;
         }

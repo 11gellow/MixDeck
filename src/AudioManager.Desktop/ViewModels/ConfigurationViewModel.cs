@@ -25,6 +25,8 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private bool reloading;
     private Task pending = Task.CompletedTask;
     private int queued;
+    private long failureVersion;
+    private string? lastFailure;
     public Func<Task>? BeforeApply { get; set; }
     public Task WhenIdleAsync() => pending;
 
@@ -160,7 +162,14 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         return completion.Task;
         async Task RunQueuedAsync()
         {
-            try { await previous; await action(); }
+            try
+            {
+                await previous;
+                var beforeFailure = failureVersion;
+                await action();
+                // 配置落盘成功不代表系统接受了音量；保留本次操作的失败回读。
+                if (failureVersion != beforeFailure && lastFailure is { } failure) Status = failure;
+            }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 Status = exception.Message;
@@ -236,6 +245,11 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private void Report(RestoreResult result)
     {
         Status = result.Target + "：" + result.Message;
+        if (!result.Succeeded)
+        {
+            failureVersion++;
+            lastFailure = Status;
+        }
         var source = result.Message.Contains("自动保存", StringComparison.Ordinal) ? "自动保存" : "配置恢复";
         if (result.Succeeded) log.Info(Status, source);
         else log.Warning(Status, source);
