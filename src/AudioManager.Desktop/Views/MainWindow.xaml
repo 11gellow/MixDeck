@@ -206,7 +206,7 @@
                                 ToolTip="数值正常但声音异常时，重新写入当前实际主音量并回读；不自动改变音量或静音目标。" />
                     </StackPanel>
                     <Slider Grid.Column="2" Style="{StaticResource VolumeSliderStyle}" Margin="0,0,12,0"
-                            PreviewMouseDown="OnSliderMouseDown" PreviewKeyDown="OnSliderKeyDown" PreviewKeyUp="OnSliderKeyUp" PreviewMouseWheel="OnSliderWheel"
+                            PreviewKeyDown="OnSliderKeyDown" PreviewKeyUp="OnSliderKeyUp" PreviewMouseWheel="OnSliderWheel"
                             Value="{Binding MasterVolume}" IsEnabled="{Binding CanControlMaster}" AutomationProperties.Name="系统主音量" />
                     <TextBlock Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right" FontSize="14"
                                Text="{Binding MasterVolume, StringFormat={}{0:0}%}" />
@@ -317,7 +317,7 @@
                                     </Button>
 
                                     <Slider Grid.Column="3" Style="{StaticResource VolumeSliderStyle}" Margin="0,0,12,0"
-                                            PreviewMouseDown="OnSliderMouseDown" PreviewKeyDown="OnSliderKeyDown" PreviewKeyUp="OnSliderKeyUp" PreviewMouseWheel="OnSliderWheel"
+                                            PreviewKeyDown="OnSliderKeyDown" PreviewKeyUp="OnSliderKeyUp" PreviewMouseWheel="OnSliderWheel"
                                             Value="{Binding Volume}" IsEnabled="{Binding CanControl}" AutomationProperties.Name="{Binding DisplayName}" />
                                     <TextBlock Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Right"
                                                Text="{Binding Volume, StringFormat={}{0:0}%}" />
