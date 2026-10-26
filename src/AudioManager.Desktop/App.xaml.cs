@@ -39,6 +39,8 @@ public partial class App : Application
             .AddSingleton(TimeProvider.System)
             .AddSingleton<AppIconProvider>()
             .AddSingleton<OperationLog>()
+            .AddSingleton(_ => new AudioEventJournal(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixDeck", "diagnostics", "audio-events.jsonl")))
             .AddSingleton<MainViewModel>()
             .AddSingleton<MainWindow>()
             .BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });

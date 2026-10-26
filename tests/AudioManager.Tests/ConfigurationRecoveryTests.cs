@@ -392,10 +392,10 @@ internal sealed class ConfigurationScenario : IDisposable
         , .. OtherDevices.Select(id => new AudioDeviceRuntimeState(new(id, id, AudioDeviceState.Active), Raw.Masters.GetValueOrDefault(id, new(.5f, false)), true,
             Raw.Sessions.Values.Where(session => session.Key.DeviceId == id).ToArray(), []))], new Dictionary<AudioDeviceRole, string?> { [AudioDeviceRole.Multimedia] = DefaultDeviceId }, []);
     public Task StartAsync() => Service.HandleStateAsync(State());
-    public Task PushAsync(AudioStateChangeKind kind, AudioChangeOrigin origin, AudioSessionKey? sessionKey = null)
+    public Task PushAsync(AudioStateChangeKind kind, AudioChangeOrigin origin, AudioSessionKey? sessionKey = null, Guid? context = null)
     {
         var state = State();
-        return Service.HandleStateAsync(state, new(kind, origin, state, "device-a", sessionKey));
+        return Service.HandleStateAsync(state, new(kind, origin, state, "device-a", sessionKey, context));
     }
     public void Dispose()
     {

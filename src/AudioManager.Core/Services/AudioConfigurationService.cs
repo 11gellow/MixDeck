@@ -13,6 +13,7 @@ public sealed class AudioConfigurationService(IConfigurationStore store, IAudioC
     private readonly HashSet<string> failedAutomaticTargets = new(StringComparer.Ordinal);
     // 保存已确认实际值，区别恢复回调与后续用户调节；不使用事件中的过时音量。
     private readonly Dictionary<string, SavedVolume> observedVolumes = new(StringComparer.Ordinal);
+    private readonly FirstPlaybackVolumeGuard firstPlaybackGuard = new();
     private AudioRuntimeState? latestState;
     private readonly Dictionary<Guid, VolumeEdit> volumeEdits = [];
     private sealed record VolumeEdit(string DeviceId, AudioSessionKey? SessionKey, Guid ProfileId, string TargetKey);
@@ -248,6 +249,7 @@ public sealed class AudioConfigurationService(IConfigurationStore store, IAudioC
             if (latestState is { } current && state.Revision < current.Revision) return;
             var previous = latestState;
             latestState = state;
+            firstPlaybackGuard.Observe(state);
             if (retry) failedAutomaticTargets.Clear();
             if (change is { Kind: AudioStateChangeKind.SessionRemoved, SessionKey: { } removed })
             {
@@ -347,6 +349,16 @@ public sealed class AudioConfigurationService(IConfigurationStore store, IAudioC
         var actual = session is null ? await controller.GetMasterVolumeAsync(device.Device.Id, lifetime.Token)
             : await controller.GetSessionVolumeAsync(session.Key, lifetime.Token);
         if (!force && observedVolumes.TryGetValue(key, out var observed) && SameActualVolume(observed, actual)) return;
+        if (!force && session is not null)
+        {
+            var saved = profile.Rules.FirstOrDefault(rule => rule.Enabled && SameDevice(rule.Target.Target.DeviceId, device.Device.Id)
+                && rule.Target.Target.Application is { } app && AudioIdentityMatcher.Matches(app, session));
+            if (saved is not null && firstPlaybackGuard.TryProtect(session, change, saved.Target.Volume, observedVolumes.GetValueOrDefault(key), actual))
+            {
+                await ApplyOneAsync(saved.Target, session.Key, automatic: true);
+                return;
+            }
+        }
         var entry = new SavedVolumeEntry(new(device.Device.Id, identity), session is null ? device.Device.Name + " 主音量" : session.IsSystemSounds ? "系统声音" : session.Name,
             new(actual.Level, actual.IsMuted));
         var targetKey = ConfigurationJson.TargetKey(entry.Target);
