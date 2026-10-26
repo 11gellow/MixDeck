@@ -105,7 +105,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         await finishEdits.WaitAsync();
         try
         {
-            foreach (var (key, edit) in volumeEdits.ToArray())
+            // 一并移交本批编辑；等待旧写入/保存期间的新拖动必须建立自己的令牌。
+            var edits = volumeEdits.ToArray();
+            volumeEdits.Clear();
+            foreach (var (key, edit) in edits)
             {
                 try
                 {
@@ -116,9 +119,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 catch (Exception exception) { Log.Error("完成音量编辑失败", exception); }
                 finally
                 {
-                    volumeEdits.Remove(key);
-                    if (key is SessionViewModel session) session.VolumeEditStarted = null;
-                    else masterEditStarted = null;
+                    if (key is SessionViewModel session)
+                    {
+                        if (ReferenceEquals(session.VolumeEditStarted, edit.Token)) session.VolumeEditStarted = null;
+                    }
+                    else if (ReferenceEquals(masterEditStarted, edit.Token)) masterEditStarted = null;
                 }
             }
         }

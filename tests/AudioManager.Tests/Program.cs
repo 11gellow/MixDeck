@@ -4,10 +4,11 @@ namespace AudioManager.Tests;
 
 internal static class Program
 {
-    // VSTest 通过 testhost 加载测试。此入口只用于真实集成测试创建另一进程的无声会话。
+    // VSTest 通过 testhost 加载测试。此入口用于独立音频/桌面测试夹具。
     [MTAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--slider-track-fixture") return SliderInteractionTests.RunFixture(args[1]);
         if (args.Length == 1 && args[0] == "--desktop-audio-fixture") return DesktopAudioFixture.Run();
         if (args.Length == 3 && args[0] == "--configuration-restore-probe" && uint.TryParse(args[2], out var pid))
             return ConfigurationRestoreProbe.Run(args[1], pid);
