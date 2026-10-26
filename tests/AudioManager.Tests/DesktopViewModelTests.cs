@@ -13,6 +13,37 @@ public sealed class DesktopViewModelTests
     private const string DeviceB = "device-b";
 
     [Fact]
+    public async Task ReapplyMasterWritesFreshActualValueEvenWhenSliderIsUnchanged()
+    {
+        var (monitor, controller, vm) = Create();
+        using (vm)
+        {
+            await vm.InitializeAsync();
+            monitor.SetMaster(DeviceA, new AudioVolume(.37f, true));
+            await vm.ReapplyMasterVolumeCommand.ExecuteAsync();
+            Assert.Equal((DeviceA, .37f), Assert.Single(controller.MasterWrites));
+            Assert.Empty(controller.MasterMuteWrites);
+            Assert.Equal(37, vm.MasterVolume);
+            Assert.True(vm.IsMasterMuted);
+            Assert.Contains(vm.Log.Entries, item => item.Text.Contains("听感"));
+        }
+    }
+
+    [Fact]
+    public async Task ReapplyMasterReportsFailureAndKeepsActualVolume()
+    {
+        var (_, controller, vm) = Create();
+        using (vm)
+        {
+            await vm.InitializeAsync();
+            controller.FailMasterWrites = new InvalidOperationException("拒绝写入");
+            await vm.ReapplyMasterVolumeCommand.ExecuteAsync();
+            Assert.Equal(50, vm.MasterVolume);
+            Assert.Contains(vm.Log.Entries, item => item.IsError && item.Text.Contains("拒绝写入"));
+        }
+    }
+
+    [Fact]
     public async Task SelectingOutputChangesWindowsDefaultInsteadOfOnlyDisplayingItsSessions()
     {
         var (monitor, controller, viewModel) = Create();

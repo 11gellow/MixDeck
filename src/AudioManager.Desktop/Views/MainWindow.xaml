@@ -201,6 +201,9 @@
                         </StackPanel>
                         <TextBlock Text="{Binding SelectedDevice.Name}" Style="{StaticResource SecondaryTextStyle}" />
                         <TextBlock Text="{Binding MasterControlStatus}" Foreground="{StaticResource WarningBrush}" FontSize="11" TextWrapping="Wrap" />
+                        <Button Content="重新应用主音量" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                Command="{Binding ReapplyMasterVolumeCommand}"
+                                ToolTip="数值正常但声音异常时，重新写入当前实际主音量并回读；不自动改变音量或静音目标。" />
                     </StackPanel>
                     <Slider Grid.Column="2" Style="{StaticResource VolumeSliderStyle}" Margin="0,0,12,0"
                             PreviewMouseDown="OnSliderMouseDown" PreviewKeyDown="OnSliderKeyDown" PreviewKeyUp="OnSliderKeyUp" PreviewMouseWheel="OnSliderWheel"

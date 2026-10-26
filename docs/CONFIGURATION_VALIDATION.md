@@ -1,5 +1,15 @@
 # 阶段 4 配置保存与自动恢复
 
+## 2026-10-25：重启失败现场与同值重写实验
+
+- Explorer 重新打开后补验：用户确认已重新打开，CIM 返回标准路径唯一进程 PID 37716、14:21:07 启动。CIM_DataFile.Copy 得到 reboot-explorer-20261025-1421.json，与先前真实配置 SHA256 均为 9A853338CE89F9663DD59ABCF9E0D34EEA2C7102A29EA00730E97109322AE4F9；配置未被私有副本覆盖。标准测试 DLL 仅执行 SessionMetadataDiagnosticsKeepReadableSessionsAvailable，1/1 通过，7 会话/0 警告，主音量 100%、酷狗 100%、Steam 98%，匹配真实规则。此证据确认正常环境重新加载与部署，不证明重启重置或听感问题已解决。
+
+- 用户确认自动打开，酷狗约 10%（不完全确定）变为 100%，听感偏小需要拖动 Windows 主音量；后续回复可能已恢复，听感结果未确定。真实系统启动 13:54:15，Desktop 13:56:12。自动打开不等于配置恢复通过。
+- 独立 CIM 复制真实配置及备份到 artifacts/reboot-real-20261025.json、reboot-real-backup-20261025.json。真实配置 39363 字节、13:59:56 更新；工具私有副本 34762 字节、前一天更新，两者不同。真实 Razer 酷狗目标及备份均为 1。只读实机 7 会话、0 警告，酷狗路径 D:/KGMusic/KuGou.exe 与规则一致，实际音量 1；主音量 1。目标变更来源尚未确认。
+- 新增手动“重新应用主音量”：先等待编辑完成，再读实际值、同值写入并回读，保留静音，不采用旧 UI 数值，不执行自动音量跳变。新测试覆盖最新实际值及失败处理；初始缺少入口导致编译失败，补实现后通过，不等同听感异常已复现或修复。
+- 标准严格构建命令 dotnet build AudioManager.sln --configuration Debug --no-restore --nologo --warnaserror，0 警告/错误。组件过滤 Category!=Integration，187/187、0 跳过，reboot-standard-components.trx；隔离真实只读 SessionMetadataDiagnosticsKeepReadableSessionsAvailable 1/1 通过。未跑改变音量的整套实机测试。
+- 标准路径已更新；sky.launch_app 启动继承私有配置，酷狗变为 10%、Steam 100%，原真实状态为 100%/98%，不能记为修复。输入接口随后无法取得窗口坐标，已请求用户正常退出并从 Explorer 双击标准 exe，等待核对真实环境。未复制私有配置到真实路径，未改登录项或重启、提交。
+
 > 更新：2026-10-22。S4-11 设备方案/自动保存及 S4-12 系统输出切换已实现，最新 179 项回归通过；S4-09 实际重启登录仍待明确结果。2026-10-21 的开关/持续纠偏记录仅作历史，不代表当前行为。
 
 ## 2026-10-22：下拉同步 Windows 输出设备（S4-12）
