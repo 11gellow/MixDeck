@@ -21,6 +21,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly AppIconProvider icons;
     private readonly TimeProvider time;
     private readonly IDefaultAudioOutputController? defaultOutput;
+    private readonly AudioEventJournal? audioJournal;
     private readonly LatestValueWriter<(string DeviceId, float Level)> masterWriter;
     private readonly SelfEchoGuard masterEchoGuard;
     private readonly CancellationTokenSource lifetime = new();
@@ -54,13 +55,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string stateVersionText = "";
 
     public MainViewModel(IAudioController controller, IAudioStateMonitor monitor, AppIconProvider icons, OperationLog log, TimeProvider time,
-        ConfigurationViewModel? configuration = null, IDefaultAudioOutputController? defaultOutput = null)
+        ConfigurationViewModel? configuration = null, IDefaultAudioOutputController? defaultOutput = null, AudioEventJournal? audioJournal = null)
     {
         this.controller = controller;
         this.monitor = monitor;
         this.icons = icons;
         this.time = time;
         this.defaultOutput = defaultOutput;
+        this.audioJournal = audioJournal;
         Log = log;
         Configuration = configuration;
         if (Configuration is not null) Configuration.BeforeApply = FinishVolumeEditsAsync;
@@ -333,6 +335,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void OnRestoreReadback(string deviceId, AudioSessionKey? sessionKey, AudioVolume actual)
     {
+        audioJournal?.RecordRestore(deviceId, sessionKey, actual);
         if (loadedDeviceId != deviceId) return;
         if (sessionKey is null)
         {
@@ -401,8 +404,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 if (disposed) break;
                 try
                 {
+                    audioJournal?.Record("received", change.State, change, Configuration?.Service.Current);
                     ApplyChange(change);
                     if (Configuration is not null) await Configuration.Service.HandleStateAsync(change.State, change);
+                    audioJournal?.Record("processed", change.State, change, Configuration?.Service.Current);
                 }
                 catch (Exception exception) { Log.Error("更新界面状态失败", exception); }
             }
@@ -428,6 +433,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void ApplyState(AudioRuntimeState state, AudioSessionKey? externalSession = null, string? externalMasterDevice = null)
     {
         if (runtimeState is { } current && state.Revision < current.Revision) return;
+        if (runtimeState is not { IsRunning: true }) audioJournal?.Record("initial", state, null, Configuration?.Service.Current);
         runtimeState = state;
         defaultDeviceId = state.DefaultOutputDevices.GetValueOrDefault(AudioDeviceRole.Multimedia);
         var preferred = defaultDeviceId ?? SelectedDevice?.Id;

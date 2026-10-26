@@ -1,5 +1,15 @@
 # 阶段 4 配置保存与自动恢复
 
+## S4-19 首次播放重置修复（2026-10-26，待真实重启验收）
+
+- 真实证据：通过 CIM_DataFile.Copy 从实际用户目录复制 `audio-events.jsonl` 到 `artifacts/first-playback-real-20261026.jsonl`。重启后同一酷狗会话先显示/保存 0.096262924，19:18:17.810 在 Inactive 收到 GUID_NULL 100% 外部音量事件，17.828 目标已保存为 100%，18.727 才变为 Active。没有新会话创建事件，原有音量自动保存将首次播放重置当成调节是已确认的配置污染路径。
+- 修复限于 Core：独立首次播放策略维护会话播放/一次尝试记录；仅在无播放历史、当前空闲、外部 GUID_NULL、满音量、静音不变、观察基线与启用规则一致时恢复旧目标，不持久化或扩散重置值。没有应用名称特例，没有无限纠偏；失败仍由原系统写入保护处理。会话/设备失效清理运行时记录，不改 JSON 格式和原始快照。
+- 来源边界：[微软 OnSimpleVolumeChanged 文档](https://learn.microsoft.com/en-us/windows/win32/api/audiopolicy/nf-audiopolicy-iaudiosessionevents-onsimplevolumechanged)说明 EventContext 由修改方提供。GUID_NULL 不能证明写入方是 Windows，也不能可靠表达手动意图。完全相同条件下的匿名主动满音量操作同样会触发一次保护；已播放后的操作不受该保护影响。真实 Windows 混合器人工调节仍需验收，不作无条件兼容承诺。
+- 确定性回归：暂不接入保护时现场顺序回放失败，实际 1、预期 0.096262924（`first-playback-before.trx`）；接入后目标、快照文件和同路径/其他应用均保持，Self 不循环。覆盖带来源、已播放、静音变更、非满音量、禁用目标、一次预算、写入拒绝和会话重新创建。
+- 原生测试 `NativeFirstPlaybackResetRestoresSavedLevelAndLaterExternalControlStillSaves`：独立测试进程无声流暂停，监控初态为 Inactive；原生 SetVolume(1, Guid.Empty) 回调进入配置服务，回读恢复 .1，文件未变；开始流后同样 GUID_NULL 调至 1 正常保存。仅修改该测试会话，finally 恢复初始音量/静音并回读，清理临时配置/子进程；不写真实用户配置或主音量。
+- 用户正常退出、CIM 确认无实例后：`dotnet build AudioManager.sln --configuration Debug --no-restore --nologo --warnaserror` 成功，0 警告/错误。设置 `AUDIO_MANAGER_RUN_INTEGRATION_TESTS=1`，运行 `dotnet test tests/AudioManager.Tests/AudioManager.Tests.csproj --configuration Debug --no-build --nologo --filter 'FullyQualifiedName!~Integration|FullyQualifiedName~NativeFirstPlaybackReset' --logger 'trx;LogFileName=first-playback-final.trx' --results-directory artifacts/playback-reset/TestResults`，199/199 通过、0 失败/跳过（197 单元/组件、1 真实设备注册、1 本次原生测试）。不是所有历史真实音频用例的完整回归。
+- 标准路径已更新，未工具启动用户实例或自动重启。S4-19 保持待验证：已被旧版保存为 100% 的目标需用户在新版重新设为约 10%，然后重启、首次播放确认目标不再污染，并检查正常系统调节。诊断记录暂留用于本次真实验收。
+
 ## 2026-10-25：重启失败现场与同值重写实验
 
 - Explorer 重新打开后补验：用户确认已重新打开，CIM 返回标准路径唯一进程 PID 37716、14:21:07 启动。CIM_DataFile.Copy 得到 reboot-explorer-20261025-1421.json，与先前真实配置 SHA256 均为 9A853338CE89F9663DD59ABCF9E0D34EEA2C7102A29EA00730E97109322AE4F9；配置未被私有副本覆盖。标准测试 DLL 仅执行 SessionMetadataDiagnosticsKeepReadableSessionsAvailable，1/1 通过，7 会话/0 警告，主音量 100%、酷狗 100%、Steam 98%，匹配真实规则。此证据确认正常环境重新加载与部署，不证明重启重置或听感问题已解决。
