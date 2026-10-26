@@ -143,6 +143,8 @@ public sealed partial class LiveAudioTests(ITestOutputHelper output)
     {
         using var controller = Create();
         var device = await RequireDefault(controller);
+        var master = await controller.GetMasterVolumeAsync(device.Id);
+        output.WriteLine($"设备={device.Id}；名称={device.Name}；主音量={master.Level}；静音={master.IsMuted}");
         var result = await controller.EnumerateSessionsAsync(device.Id);
         foreach (var issue in result.Issues)
         {
@@ -154,6 +156,7 @@ public sealed partial class LiveAudioTests(ITestOutputHelper output)
         {
             Assert.False(string.IsNullOrWhiteSpace(session.Key.InstanceId));
             Assert.InRange(session.Volume.Level, 0f, 1f);
+            output.WriteLine($"会话={session.Name}；PID={session.ProcessId}；路径={session.ProcessPath ?? "不可读"}；音量={session.Volume.Level}；静音={session.Volume.IsMuted}；状态={session.State}");
         }
         output.WriteLine($"只读枚举：{result.Items.Count} 个会话，{result.Issues.Count} 项警告；未写入音量或配置。");
     }

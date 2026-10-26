@@ -73,6 +73,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         masterEchoGuard = new SelfEchoGuard(time);
         masterWriter = new LatestValueWriter<(string, float)>(WriteMasterVolumeAsync);
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsLoading && !IsSwitchingOutput);
+        ReapplyMasterVolumeCommand = new AsyncRelayCommand(ReapplyMasterVolumeAsync, () => CanControlMaster);
         ToggleMasterMuteCommand = new AsyncRelayCommand(ToggleMasterMuteAsync, () => CanControlMaster && !isMasterMuteChanging);
         Sessions.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowEmptySessions));
     }
@@ -149,6 +150,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<DeviceItemViewModel> Devices { get; } = [];
     public ObservableCollection<SessionViewModel> Sessions { get; } = [];
     public AsyncRelayCommand RefreshCommand { get; }
+    public AsyncRelayCommand ReapplyMasterVolumeCommand { get; }
     public ICommand ToggleMasterMuteCommand { get; }
 
     public DeviceItemViewModel? SelectedDevice
@@ -674,6 +676,36 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             Log.Error("回读系统主音量失败", exception);
         }
+    }
+
+    private async Task ReapplyMasterVolumeAsync()
+    {
+        if (loadedDeviceId is not { } deviceId || disposed) return;
+        IsLoading = true;
+        try
+        {
+            await FlushEditsAsync();
+            // 使用最新实际值，不能把 UI 显示的旧数值或舍入值写回系统。
+            var before = await controller.GetMasterVolumeAsync(deviceId, lifetime.Token);
+            await controller.SetMasterVolumeAsync(deviceId, before.Level, lifetime.Token);
+            var actual = await controller.GetMasterVolumeAsync(deviceId, lifetime.Token);
+            if (loadedDeviceId == deviceId)
+            {
+                masterEchoGuard.Wrote(actual.Level);
+                ApplyMasterVolume(actual, force: true);
+            }
+            if (Math.Abs(actual.Level - before.Level) > .005f)
+                Log.Warning($"重新应用主音量未确认成功；请求 {FormatVolume(before)}，实际 {FormatVolume(actual)}", "本软件");
+            else
+                Log.Info($"已重新写入主音量并回读：{FormatVolume(actual)}；请确认实际听感是否恢复", "本软件");
+        }
+        catch (OperationCanceledException) when (disposed || lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            Log.Error("重新应用主音量失败", exception);
+            if (!disposed) await ReloadMasterVolumeAsync(deviceId);
+        }
+        finally { IsLoading = false; }
     }
 
     private async Task ToggleMasterMuteAsync()
