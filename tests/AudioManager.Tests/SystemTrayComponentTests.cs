@@ -1,5 +1,6 @@
 using System.Windows.Threading;
 using AudioManager.Desktop.Services;
+using AudioManager.Desktop.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;
 using Forms = System.Windows.Forms;
 
@@ -36,6 +37,34 @@ public sealed class SystemTrayComponentTests
                     }
                     finally { tray.Dispose(); tray.Dispose(); }
                     Assert.True(menu.IsDisposed);
+                    var refreshes = 0;
+                    var reapplies = 0;
+                    var enabled = true;
+                    var refresh = new AsyncRelayCommand(() => { refreshes++; return Task.CompletedTask; }, () => enabled);
+                    var reapply = new AsyncRelayCommand(() => { reapplies++; return Task.CompletedTask; }, () => enabled);
+                    var shortcuts = new Forms.ContextMenuStrip();
+                    using (var richerTray = new SystemTrayIcon(dispatcher, () => shows++, () => exits++, NullLogger.Instance, shortcuts, refresh, reapply))
+                    {
+                        var refreshItem = shortcuts.Items.OfType<Forms.ToolStripMenuItem>().Single(item => item.Text == "刷新音频状态");
+                        var reapplyItem = shortcuts.Items.OfType<Forms.ToolStripMenuItem>().Single(item => item.Text == "重新应用当前设备方案");
+                        refreshItem.PerformClick();
+                        reapplyItem.PerformClick();
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                        Assert.Equal(1, refreshes);
+                        Assert.Equal(1, reapplies);
+                        enabled = false;
+                        typeof(Forms.ContextMenuStrip).GetMethod("OnOpening", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                            .Invoke(shortcuts, [new System.ComponentModel.CancelEventArgs()]);
+                        Assert.False(refreshItem.Enabled);
+                        Assert.False(reapplyItem.Enabled);
+                        refreshItem.PerformClick();
+                        reapplyItem.PerformClick();
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                        Assert.Equal(1, refreshes);
+                        Assert.Equal(1, reapplies);
+                        Assert.Equal("退出", shortcuts.Items[shortcuts.Items.Count - 1].Text);
+                    }
+                    Assert.True(shortcuts.IsDisposed);
                     completion.TrySetResult();
                 }
                 catch (Exception exception) { completion.TrySetException(exception); }

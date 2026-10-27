@@ -7,7 +7,7 @@ using AudioManager.Core.Models;
 
 namespace AudioManager.Desktop.Services;
 
-/// <summary>首次播放重置的诊断记录。只接收现有消费者的数据，不访问音频接口或配置文件。</summary>
+/// <summary>有界音频诊断记录。只接收现有消费者的数据，不访问音频接口或配置文件。</summary>
 public sealed class AudioEventJournal(string filePath)
 {
     private const long MaximumBytes = 1024 * 1024;
@@ -50,7 +50,7 @@ public sealed class AudioEventJournal(string filePath)
         {
             try
             {
-                var line = JsonSerializer.Serialize(new { Diagnostic = "S4-19", At = DateTimeOffset.UtcNow, RunId = runId,
+                var line = JsonSerializer.Serialize(new { Diagnostic = "AudioState", At = DateTimeOffset.UtcNow, RunId = runId,
                     ProcessId = Environment.ProcessId, Build = typeof(AudioEventJournal).Assembly.ManifestModule.ModuleVersionId, Data = data }, Options);
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(filePath))!);
                 if (File.Exists(filePath) && new FileInfo(filePath).Length >= MaximumBytes)

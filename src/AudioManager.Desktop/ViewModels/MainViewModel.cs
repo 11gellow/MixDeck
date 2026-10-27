@@ -22,6 +22,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly TimeProvider time;
     private readonly IDefaultAudioOutputController? defaultOutput;
     private readonly AudioEventJournal? audioJournal;
+    private bool journalFailureReported;
     private readonly LatestValueWriter<(string DeviceId, float Level)> masterWriter;
     private readonly SelfEchoGuard masterEchoGuard;
     private readonly CancellationTokenSource lifetime = new();
@@ -341,6 +342,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void OnRestoreReadback(string deviceId, AudioSessionKey? sessionKey, AudioVolume actual)
     {
         audioJournal?.RecordRestore(deviceId, sessionKey, actual);
+        ReportJournalFailure();
         if (loadedDeviceId != deviceId) return;
         if (sessionKey is null)
         {
@@ -413,6 +415,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     ApplyChange(change);
                     if (Configuration is not null) await Configuration.Service.HandleStateAsync(change.State, change);
                     audioJournal?.Record("processed", change.State, change, Configuration?.Service.Current);
+                    ReportJournalFailure();
                 }
                 catch (Exception exception) { Log.Error("更新界面状态失败", exception); }
             }
@@ -439,6 +442,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         if (runtimeState is { } current && state.Revision < current.Revision) return;
         if (runtimeState is not { IsRunning: true }) audioJournal?.Record("initial", state, null, Configuration?.Service.Current);
+        ReportJournalFailure();
         runtimeState = state;
         defaultDeviceId = state.DefaultOutputDevices.GetValueOrDefault(AudioDeviceRole.Multimedia);
         var preferred = defaultDeviceId ?? SelectedDevice?.Id;
@@ -769,6 +773,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasReadIssues));
         OnPropertyChanged(nameof(ReadIssueSummary));
         OnPropertyChanged(nameof(ReadIssueDetails));
+    }
+
+    private void ReportJournalFailure()
+    {
+        if (!journalFailureReported && audioJournal?.LastError is { } error)
+        {
+            journalFailureReported = true;
+            Log.Warning("音频诊断文件写入失败，音频控制继续运行：" + error.Message, "诊断");
+        }
     }
 
     /// <summary>停止读取通知；监听服务本身由容器在之后释放。</summary>

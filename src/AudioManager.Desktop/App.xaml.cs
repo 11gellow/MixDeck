@@ -20,6 +20,7 @@ public partial class App : Application
     private ServiceProvider? services;
     private DesktopLifetime? lifetime;
     private SystemTrayIcon? tray;
+    private Action? updateTitleBar;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -35,6 +36,9 @@ public partial class App : Application
             .AddSingleton<ILoginStartup>(_ => new WindowsLoginStartup(Path.ChangeExtension(typeof(App).Assembly.Location, ".exe")))
             .AddSingleton<AudioConfigurationService>()
             .AddSingleton<IConfigurationDialogs, ConfigurationDialogs>()
+            .AddSingleton(_ => new ThemeService(Resources, Dispatcher, WindowsThemePreference.IsDark,
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixDeck", "appearance.json")))
+            .AddSingleton<AppearanceViewModel>()
             .AddSingleton<ConfigurationViewModel>()
             .AddSingleton(TimeProvider.System)
             .AddSingleton<AppIconProvider>()
@@ -46,11 +50,18 @@ public partial class App : Application
             .BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
 
         MainWindow = services.GetRequiredService<MainWindow>();
+        var themes = services.GetRequiredService<ThemeService>();
+        updateTitleBar = () => WindowsThemePreference.ApplyTitleBar(new System.Windows.Interop.WindowInteropHelper(MainWindow).Handle,
+            themes.EffectiveTheme == AppThemeMode.Dark);
+        themes.Changed += updateTitleBar;
+        MainWindow.SourceInitialized += OnWindowSourceInitialized;
         lifetime = new DesktopLifetime(ShowMainWindow, MainWindow.Hide, () => _ = ShutdownAfterFlushAsync());
         try
         {
             tray = new SystemTrayIcon(Dispatcher, lifetime.ShowWindow, lifetime.RequestExit,
-                services.GetRequiredService<ILogger<SystemTrayIcon>>());
+                services.GetRequiredService<ILogger<SystemTrayIcon>>(),
+                refreshCommand: services.GetRequiredService<MainViewModel>().RefreshCommand,
+                reapplyCommand: services.GetRequiredService<ConfigurationViewModel>().ReapplyCommand);
             lifetime.EnableTray();
         }
         catch (Exception exception)
@@ -98,6 +109,7 @@ public partial class App : Application
 
     private void OnSessionEnding(object sender, SessionEndingCancelEventArgs e) => lifetime?.PrepareSessionEnd();
     private void OnExitRequested(object? sender, EventArgs e) => lifetime?.RequestExit();
+    private void OnWindowSourceInitialized(object? sender, EventArgs e) => updateTitleBar?.Invoke();
 
     private async Task ShutdownAfterFlushAsync()
     {
@@ -110,10 +122,12 @@ public partial class App : Application
         SessionEnding -= OnSessionEnding;
         if (MainWindow is not null)
         {
+            MainWindow.SourceInitialized -= OnWindowSourceInitialized;
             MainWindow.Closing -= OnMainWindowClosing;
             MainWindow.StateChanged -= OnWindowStateChanged;
             if (MainWindow is MainWindow mainView) mainView.ExitRequested -= OnExitRequested;
         }
+        if (updateTitleBar is not null && services is not null) services.GetRequiredService<ThemeService>().Changed -= updateTitleBar;
         try { tray?.Dispose(); }
         finally { services?.Dispose(); base.OnExit(e); }
     }

@@ -8,6 +8,7 @@ internal static class Program
     [MTAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--appearance-fixture") return AppearanceTests.RunFixture(args[1]);
         if (args.Length == 2 && args[0] == "--slider-track-fixture") return SliderInteractionTests.RunFixture(args[1]);
         if (args.Length == 1 && args[0] == "--desktop-audio-fixture") return DesktopAudioFixture.Run();
         if (args.Length == 3 && args[0] == "--configuration-restore-probe" && uint.TryParse(args[2], out var pid))

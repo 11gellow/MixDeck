@@ -241,6 +241,61 @@ public sealed class AudioConfigurationService(IConfigurationStore store, IAudioC
         finally { gate.Release(); }
     }
 
+    /// <summary>只读比较当前方案和新鲜 API 值，不学习差异、不写音量或配置。</summary>
+    public async Task<IReadOnlyList<VolumeDiagnostic>> InspectAsync(AudioRuntimeState state, string deviceId)
+    {
+        await gate.WaitAsync(lifetime.Token);
+        try
+        {
+            var profile = ProfileForDevice(deviceId) ?? throw new InvalidOperationException("该设备尚无保存方案。");
+            var device = state.Devices.FirstOrDefault(item => SameDevice(item.Device.Id, deviceId));
+            var result = new List<VolumeDiagnostic>();
+            foreach (var rule in profile.Rules.Where(rule => SameDevice(rule.Target.Target.DeviceId, deviceId)))
+            {
+                var entry = rule.Target;
+                if (!rule.Enabled) { result.Add(new(entry.DisplayName, deviceId, null, entry.Volume, null, VolumeDiagnosticState.Disabled, "规则已禁用，不参与恢复。")); continue; }
+                if (!state.IsRunning || device is null || !Available(device))
+                { result.Add(new(entry.DisplayName, deviceId, null, entry.Volume, null, VolumeDiagnosticState.Unavailable, "设备未监听或不可用。")); continue; }
+                var sessions = entry.Target.Application is { } app ? device.Sessions.Where(session => session.State != AudioSessionState.Expired && AudioIdentityMatcher.Matches(app, session)).ToArray() : null;
+                if (sessions is { Length: 0 })
+                { result.Add(new(entry.DisplayName, deviceId, null, entry.Volume, null, VolumeDiagnosticState.WaitingForSession, "应用尚无可匹配会话，保留目标。")); continue; }
+                foreach (var key in sessions is null ? new AudioSessionKey?[] { null } : sessions.Select(session => (AudioSessionKey?)session.Key))
+                {
+                    try
+                    {
+                        var actual = key is null ? await controller.GetMasterVolumeAsync(deviceId, lifetime.Token) : await controller.GetSessionVolumeAsync(key, lifetime.Token);
+                        result.Add(new(entry.DisplayName, deviceId, key, entry.Volume, actual,
+                            AudioIdentityMatcher.EqualVolume(entry.Volume, actual) ? VolumeDiagnosticState.Matches : VolumeDiagnosticState.Differs));
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    { result.Add(new(entry.DisplayName, deviceId, key, entry.Volume, null, VolumeDiagnosticState.Unavailable, exception.Message, exception.HResult)); }
+                }
+            }
+            return result.AsReadOnly();
+        }
+        finally { gate.Release(); }
+    }
+
+    /// <summary>显式重应用当前设备启用规则；不恢复原始快照，不把实际值存成新目标。</summary>
+    public async Task ReapplyTargetsAsync(AudioRuntimeState state, string deviceId)
+    {
+        await gate.WaitAsync(lifetime.Token);
+        try
+        {
+            if (LoadResult?.Kind == ConfigurationLoadKind.Blocked) throw new InvalidOperationException("配置读取受阻，不能重新应用。");
+            if (volumeEdits.Values.Any(edit => SameDevice(edit.DeviceId, deviceId)))
+                throw new InvalidOperationException("当前设备仍在编辑音量，请先结束编辑再重新应用。");
+            if (ProfileForDevice(deviceId) is null) throw new InvalidOperationException("该设备尚无保存方案。");
+            var device = state.Devices.FirstOrDefault(item => SameDevice(item.Device.Id, deviceId) && Available(item));
+            if (!state.IsRunning || device is null) throw new InvalidOperationException("当前设备不可用，未重新应用音量。");
+            (controller as AudioWriteGuard)?.ForgetDevice(deviceId);
+            failedAutomaticTargets.Remove(AudioWriteGuard.MasterKey(deviceId));
+            foreach (var session in device.Sessions) failedAutomaticTargets.Remove(AudioWriteGuard.SessionKey(session.Key));
+            await ApplyEntriesAsync(state, DeviceTargets(deviceId).ToArray(), automatic: false);
+        }
+        finally { gate.Release(); }
+    }
+
     public async Task HandleStateAsync(AudioRuntimeState state, AudioStateChanged? change = null, bool retry = false)
     {
         await gate.WaitAsync(lifetime.Token);

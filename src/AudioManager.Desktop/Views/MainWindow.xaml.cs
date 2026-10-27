@@ -168,4 +168,9 @@ public partial class MainWindow : Window
         Loaded -= OnLoaded;
         await viewModel.InitializeAsync();
     }
+
+    private void AdvancedOptionsView_Loaded(object sender, RoutedEventArgs e)
+    {
+
+    }
 }
