@@ -100,6 +100,8 @@ AudioManager/                  # 原规划名称，当前实际目录为 MixDeck
 
 用户前端操作和系统入口产生的 Self/External 音量/静音事件，经控制器新鲜回读确认后更新对应设备当前方案规则并原子保存；同路径其他会话统一最新目标。仅更新事件涉及目标，不用整份实时快照覆盖方案。生命周期恢复、失败回读和已确认实际值的自身回调不作为新用户调节；旧 Revision 忽略。事件来源不能识别所有第三方意图或听感异常，不声称可自动区分应用自身重置与系统入口调节。手动原始快照保持不变；显式恢复快照同时将该设备对应规则设为快照目标，避免下次恢复反向覆盖。
 
+实现事实补充（2026-10-27 同步 S4-19 已授权修复）：Core 的 FirstPlaybackVolumeGuard 为普通自动保存增加有限例外。仅对已有确认基线、启用目标、尚未观察到播放且空闲、外部 GUID_NULL 满音量重置及静音不变的会话，尝试一次恢复旧目标并跳过该次保存/同路径扩散；失败沿用既有停止重试保护，会话移除/设备失效清理运行时预算。没有应用名称特例、轮询或全局持续纠偏。完全同条件的匿名主动满音量操作也可能被保护一次，故上述无法识别全部第三方意图的边界仍有效；不把此例外表述成所有外部变化都自动保存或所有重置都可辨别。依据与回归见 [CONFIGURATION_VALIDATION.md](CONFIGURATION_VALIDATION.md) 的 S4-19 节，真实重启/兼容验收不由文档同步替代。
+
 ### 状态同步与事件处理
 
 变化来源包括本软件操作、Windows 音量混合器操作、其他应用或系统操作、配置恢复以及设备和会话变化。Desktop 控制链为“IAudioController → AudioWriteGuard → WindowsAudioController → MTA 队列 → NAudioBackend → 系统音频接口”，写入回读，不返回 COM 对象。滑块中间值合并，回读只在无后续待写值时更新界面。读取链为“IAudioStateMonitor.StartAsync → ReadChangesAsync（UI 上下文唯一消费者）→ 按 Revision 应用快照”，并将事件转交 Core 配置服务，不轮询。所有可控制项目保留 1 秒 Self 回传过滤，但不因方案管理禁用；配置服务通过 RestoreReadback 通知发布恢复后的实际值，更新 UI 并重置旧回调过滤基线。系统限制仍由 AudioWriteGuard 禁用并说明原因。External 在界面标记；默认设备变化始终跟随系统；用户下拉选择通过独立的 IDefaultAudioOutputController 切换 Windows 普通播放输出，再从监听器刷新、确认真实默认设备和应用对应方案。刷新重新枚举/重试监听并清除暂时的写入限制；隐藏托盘不停止读取，显式退出取消读取后释放容器。
@@ -201,6 +203,10 @@ Core 提供 BeginVolumeEditAsync/EndVolumeEditAsync 短期编辑令牌，按端�
 异常诊断需记录音量修改、恢复操作和 API 返回结果；提供重新获取会话、刷新状态及手动重应用目标音量的能力。先复现并验证“重新设置相同值”“改变后再恢复”等行为，再确定有效的自动恢复策略；不得承诺修复应用内部音量、驱动或其他处理环节造成的所有播放异常。
 
 ## 架构维护约束
+
+外观实现事实（2026-10-27，用户授权先双主题再界面整理）：Desktop 的 ThemeService/AppearanceViewModel 管理浅色、深色与跟随系统，资源位于 Resources/Themes，页面通过 DynamicResource 更新。WindowsThemePreference 在 Windows 层只读 AppsUseLightTheme，并对本程序窗口请求原生标题栏适配；不改系统设置。Desktop 订阅系统偏好事件，调度到 UI 线程，释放时解绑。外观单独保存到 `%LOCALAPPDATA%/MixDeck/appearance.json`（version 1，System/Light/Dark），避免给严格校验的音量配置版本 2 添加旧版不识别字段；音量配置的导入/导出/恢复默认不改变外观。外观保存失败只影响偏好记忆，不阻断音频；Core 模型、音量策略和项目依赖均不因主题调整而改变。
+
+阶段 5 实现事实（2026-10-27）：配置服务新增 InspectAsync 和 ReapplyTargetsAsync，仍在既有 gate 内读取当前设备规则并经 IAudioController 新鲜回读/应用；VolumeDiagnostic 只携带托管比较结果，不进入 JSON 配置。检查不写音量/配置，显式重应用只作用于当前设备启用目标、保留原始快照与保存目标；活跃编辑拒绝执行，显式重试限定当前设备。Desktop 高级选项及托盘复用同一检查/重应用/刷新命令，操作前结束编辑，等待期间管理设备改变会取消，未新增监听消费者或轮询。AudioEventJournal 用作有界事件/恢复记录，保留原日志路径及轮转；写入失败仅一次提示且不阻断音频。验证与听感未知结果见 [DIAGNOSTICS_VALIDATION.md](DIAGNOSTICS_VALIDATION.md)。
 
 - 本文件依据用户规划建立稳定基线；未定细节保持“待确认”，不把方案写成已实现事实。开发任务与验收见 [TASKS.md](TASKS.md)，当前状态见 [STATUS.md](STATUS.md)。
 - 普通开发遵循此架构；重大调整须先说明原因、影响及建议，获得用户同意后再实施，不以更新文档代替确认。

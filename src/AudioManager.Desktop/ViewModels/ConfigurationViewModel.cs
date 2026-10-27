@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Input;
 using AudioManager.Core.Configuration;
 using AudioManager.Core.Interfaces;
+using AudioManager.Core.Models;
 using AudioManager.Core.Services;
 using AudioManager.Desktop.Services;
 
@@ -27,16 +28,37 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private int queued;
     private long failureVersion;
     private string? lastFailure;
+    private bool hasOperationError;
     public Func<Task>? BeforeApply { get; set; }
     public Task WhenIdleAsync() => pending;
 
-    public ConfigurationViewModel(AudioConfigurationService service, IAudioStateMonitor monitor, ILoginStartup startup, IConfigurationDialogs dialogs, OperationLog log)
+    public ConfigurationViewModel(AudioConfigurationService service, IAudioStateMonitor monitor, ILoginStartup startup, IConfigurationDialogs dialogs, OperationLog log, AppearanceViewModel? appearance = null)
     {
         this.service = service;
         this.monitor = monitor;
         this.startup = startup;
         this.dialogs = dialogs;
         this.log = log;
+        Appearance = appearance;
+        InspectCommand = new AsyncRelayCommand(() => RunDeviceActionAsync(async id =>
+        {
+            var items = await service.InspectAsync(await monitor.GetStateAsync(), id);
+            Diagnostics.Clear();
+            foreach (var item in items) Diagnostics.Add(item);
+            foreach (var item in items)
+            {
+                var actual = item.Actual is { } volume ? $"{volume.Level * 100:0.#}% / {(volume.IsMuted ? "静音" : "未静音")}" : "不可读或无会话";
+                var text = $"{item.Name}：目标 {item.Target.Level * 100:0.#}% / {(item.Target.IsMuted ? "静音" : "未静音")}，实际 {actual}；{DiagnosticText(item.State)} {item.Detail}";
+                if (item.NativeErrorCode is { } code) text += $"（0x{code:X8}）";
+                if (item.State == VolumeDiagnosticState.Unavailable) log.Warning(text, "状态检查"); else log.Info(text, "状态检查");
+            }
+            Status = $"检查 {items.Count} 项：{items.Count(item => item.State == VolumeDiagnosticState.Differs)} 项差异，{items.Count(item => item.State == VolumeDiagnosticState.Unavailable)} 项不可读；API 数值不代表听感。";
+        }), () => !IsBusy && deviceId is not null);
+        ReapplyCommand = new AsyncRelayCommand(() => RunDeviceActionAsync(async id =>
+        {
+            await service.ReapplyTargetsAsync(await monitor.GetStateAsync(), id);
+            Status = "已完成当前设备方案重应用；各项结果见事件记录，保存目标与原始快照未变。";
+        }), () => !IsBusy && deviceId is not null && service.ProfileForDevice(deviceId) is not null);
         RestoreCommand = Command(async () =>
         {
             await service.RestoreSnapshotAsync(await monitor.GetStateAsync(), SelectedProfile!.Id, deviceId);
@@ -69,8 +91,15 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     }
 
     public AudioConfigurationService Service => service;
+    public AppearanceViewModel? Appearance { get; }
     public ObservableCollection<AudioProfile> Profiles { get; } = [];
     public ObservableCollection<RestoreRuleViewModel> Rules { get; } = [];
+    public ObservableCollection<VolumeDiagnostic> Diagnostics { get; } = [];
+    private static string DiagnosticText(VolumeDiagnosticState state) => state switch
+    {
+        VolumeDiagnosticState.Matches => "数值一致", VolumeDiagnosticState.Differs => "数值不一致",
+        VolumeDiagnosticState.Disabled => "规则禁用", VolumeDiagnosticState.WaitingForSession => "等待会话", _ => "不可用"
+    };
     public AudioProfile? SelectedProfile
     {
         get => selectedProfile;
@@ -97,12 +126,14 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         if (deviceId == id && deviceName == (name ?? "当前默认输出设备")) return;
         _ = CommitInputsAsync();
         deviceId = id;
+        Diagnostics.Clear();
         deviceName = name ?? "当前默认输出设备";
         selectedProfile = null;
         Reload();
         OnPropertyChanged(nameof(CurrentDeviceName));
     }
     public string Status { get => status; private set => SetProperty(ref status, value); }
+    public bool HasOperationError { get => hasOperationError; private set => SetProperty(ref hasOperationError, value); }
     public bool StartAtLogin { get => startAtLogin; set
     {
         if (reloading || !SetProperty(ref startAtLogin, value)) return;
@@ -127,6 +158,8 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand ImportCommand { get; }
     public AsyncRelayCommand ExportCommand { get; }
     public AsyncRelayCommand ResetCommand { get; }
+    public AsyncRelayCommand InspectCommand { get; }
+    public AsyncRelayCommand ReapplyCommand { get; }
 
     public async Task InitializeAsync()
     {
@@ -151,6 +184,19 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         => new(() => QueueAsync(async () => { if (BeforeApply is not null) await BeforeApply(); await action(); }),
             () => !IsBusy && (canExecute?.Invoke() ?? true));
 
+    private Task RunDeviceActionAsync(Func<string, Task> action)
+    {
+        var id = deviceId;
+        return QueueAsync(async () =>
+        {
+            if (id is null) throw new InvalidOperationException("没有选中的输出设备。");
+            if (BeforeApply is not null) await BeforeApply();
+            if (!string.Equals(id, deviceId, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("管理设备已切换，本次检查或重应用已取消，请重试。");
+            await action(id);
+        });
+    }
+
     private Task QueueAsync(Func<Task> action)
     {
         var previous = pending;
@@ -165,14 +211,16 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             try
             {
                 await previous;
+                HasOperationError = false;
                 var beforeFailure = failureVersion;
                 await action();
                 // 配置落盘成功不代表系统接受了音量；保留本次操作的失败回读。
-                if (failureVersion != beforeFailure && lastFailure is { } failure) Status = failure;
+                if (failureVersion != beforeFailure && lastFailure is { } failure) { Status = failure; HasOperationError = true; }
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 Status = exception.Message;
+                HasOperationError = true;
                 log.Error("配置自动保存或操作失败", exception);
                 Reload();
             }
@@ -247,6 +295,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         Status = result.Target + "：" + result.Message;
         if (!result.Succeeded)
         {
+            HasOperationError = true;
             failureVersion++;
             lastFailure = Status;
         }

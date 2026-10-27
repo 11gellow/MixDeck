@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Windows.Threading;
+using System.Windows.Input;
 using Microsoft.Extensions.Logging;
 using Forms = System.Windows.Forms;
 
@@ -18,8 +19,10 @@ internal sealed class SystemTrayIcon : IDisposable
     private readonly Action exit;
     private readonly ILogger logger;
     private bool disposed;
+    private readonly List<(Forms.ToolStripMenuItem Item, ICommand Command)> commands = [];
 
-    internal SystemTrayIcon(Dispatcher dispatcher, Action show, Action exit, ILogger logger, Forms.ContextMenuStrip? contextMenu = null)
+    internal SystemTrayIcon(Dispatcher dispatcher, Action show, Action exit, ILogger logger, Forms.ContextMenuStrip? contextMenu = null,
+        ICommand? refreshCommand = null, ICommand? reapplyCommand = null)
     {
         this.dispatcher = dispatcher;
         this.show = show;
@@ -33,6 +36,13 @@ internal sealed class SystemTrayIcon : IDisposable
         exitItem.Click += OnExit;
         menu.Items.Add(showItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
+        if (refreshCommand is not null || reapplyCommand is not null)
+        {
+            menu.Items.Add(new Forms.ToolStripSeparator());
+            AddCommand("刷新音频状态", refreshCommand);
+            AddCommand("重新应用当前设备方案", reapplyCommand);
+            menu.Opening += OnMenuOpening;
+        }
         menu.Items.Add(exitItem);
         icon = new Forms.NotifyIcon { Text = "Windows Audio Manager · 双击显示，右键退出", Icon = image, ContextMenuStrip = menu };
         icon.DoubleClick += OnShow;
@@ -42,6 +52,20 @@ internal sealed class SystemTrayIcon : IDisposable
 
     private void OnShow(object? sender, EventArgs args) => Dispatch(show);
     private void OnExit(object? sender, EventArgs args) => Dispatch(exit);
+
+    private void AddCommand(string text, ICommand? command)
+    {
+        if (command is null) return;
+        var item = new Forms.ToolStripMenuItem(text) { Enabled = command.CanExecute(null) };
+        item.Click += (_, _) => Dispatch(() => { if (command.CanExecute(null)) command.Execute(null); });
+        commands.Add((item, command));
+        menu.Items.Add(item);
+    }
+
+    private void OnMenuOpening(object? sender, System.ComponentModel.CancelEventArgs args)
+    {
+        foreach (var (item, command) in commands) item.Enabled = command.CanExecute(null);
+    }
 
     private void Dispatch(Action action)
     {
@@ -61,6 +85,8 @@ internal sealed class SystemTrayIcon : IDisposable
         icon.DoubleClick -= OnShow;
         showItem.Click -= OnShow;
         exitItem.Click -= OnExit;
+        menu.Opening -= OnMenuOpening;
+        commands.Clear();
         try { icon.Visible = false; }
         finally { icon.Dispose(); menu.Dispose(); image.Dispose(); }
     }

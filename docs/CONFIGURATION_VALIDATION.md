@@ -1,5 +1,12 @@
 # 阶段 4 配置保存与自动恢复
 
+## S4-19 真实重启首次播放验收（2026-10-27）
+
+- 系统启动 15:41:33；真实日志运行 PID 17544，Build 38bfd3d8-5a2d-423b-b57a-ba437ed9e863，与标准 Desktop DLL MVID 一致。通过独立 CIM_DataFile.Copy 保留日志 `artifacts/goal-stage4-real-20261027.jsonl` 和真实配置 `artifacts/goal-stage4-settings-20261027.json`，没有使用工具私有配置回写用户文件。
+- Realtek 端点 `{0.0.0.00000000}.{3ac5ed3b-e136-4277-8423-89a3afd13e43}`、酷狗 PID 31484：启动实际/目标 11%；15:44:42.025 空闲会话收到 GUID_NULL 100%，42.038 恢复回读 11%，42.039 Self 回调 11%，42.994 Active 仍 11%。事件处理前后目标保持 11%，后续多次播放至 15:58 仍 11%；当前真实配置同端点目标也为 11%。该实机证据补齐 S4-19 的真实首次播放验收，不再要求为同一问题重复重启。
+- 本轮当前工作区隔离严格 Debug 构建 0 警告/错误；`FullyQualifiedName!~Integration` 回归 203 通过、1 项实机注册测试未启用跳过；另外只读 `SessionMetadataDiagnosticsKeepReadableSessionsAvailable` 1/1 通过。报告位于 `artifacts/stage4-current/TestResults`。这些验证没有调整真实音量或配置；Windows 10、更多驱动、物理拔插、长期驻留仍归后续兼容范围。
+- 独立 StdRegProv 只读返回标准 exe 加 --tray 的 Run 项；自动进入托盘与主音量听感仍以用户事实反馈核实，不凭注册表存在或进程启动时间替代。
+
 ## S4-19 首次播放重置修复（2026-10-26，待真实重启验收）
 
 - 真实证据：通过 CIM_DataFile.Copy 从实际用户目录复制 `audio-events.jsonl` 到 `artifacts/first-playback-real-20261026.jsonl`。重启后同一酷狗会话先显示/保存 0.096262924，19:18:17.810 在 Inactive 收到 GUID_NULL 100% 外部音量事件，17.828 目标已保存为 100%，18.727 才变为 Active。没有新会话创建事件，原有音量自动保存将首次播放重置当成调节是已确认的配置污染路径。

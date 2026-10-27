@@ -5,7 +5,7 @@
 ## 定位与目标
 
 - 项目名称：Windows Audio Manager（暂定）；类型：Windows 桌面音频管理工具；目标平台：Windows 10 / Windows 11。
-- 当前工作目录仍为 `G:\c#_code\MixDeck`，不改名；工程名称沿用 `AudioManager`。阶段 1～3 已完成功能验收；阶段 4 配置模块功能已实现，真实重启登录验收等待用户反馈，进度见 [STATUS.md](STATUS.md)。
+- 当前工作目录仍为 `G:\c#_code\MixDeck`，不改名；工程名称沿用 `AudioManager`。实现事实更新（2026-10-27）：阶段 1～5 已完成对应本机功能验收，含阶段 4 真实重启登录与首次播放保护、阶段 5 诊断/显式恢复；跨系统、长期运行及打包发布仍归阶段 6。进度与适用边界见 [STATUS.md](STATUS.md)，不改变下方原规划里程碑。
 - 面向需要管理各应用音量、保存配置并恢复音量的 Windows 用户，增强原生音量混合器的管理能力。
 - 解决的使用问题：重启后音量配置变化、显示值与实际效果可能不一致、异常时需反复拖动滑块，以及缺少便捷的音量快照、备份和恢复机制。
 - 最终目标：稳定控制各应用音量，保存用户设置并按需自动恢复，减少配置丢失和重复手动调整。配置保存与恢复是主要功能，v0.4 是首个满足主要使用需求的版本。
@@ -39,7 +39,7 @@
 | 测试 | xUnit；具备环境时开展 Windows 音频集成测试 |
 | 版本与仓库管理 | Git、GitHub；当前目录已有 Git 仓库及提交，main 分支跟踪 origin/main；本轮未初始化、提交或发布 |
 
-模块职责、API、依赖和关键流程见 [ARCHITECTURE.md](ARCHITECTURE.md)。技术选择保持用户规划；阶段 1～3 证据分别见 [CORE_VALIDATION.md](CORE_VALIDATION.md)、[REALTIME_STATE_VALIDATION.md](REALTIME_STATE_VALIDATION.md)、[DESKTOP_VALIDATION.md](DESKTOP_VALIDATION.md)。阶段 4 已实现配置保存/手动恢复、方案和规则、自动恢复、登录启动，2026-10-22 完成设备方案/自动保存调整，最新完整回归 189 项（含 11 项真实集成）全部通过；用户确认的规则行为、实机证据及重启验收状态见 [CONFIGURATION_VALIDATION.md](CONFIGURATION_VALIDATION.md)。真实重启、跨系统兼容、长期运行和发布仍需证据，不据此认定正式版完成。
+模块职责、API、依赖和关键流程见 [ARCHITECTURE.md](ARCHITECTURE.md)。技术选择保持用户规划；阶段 1～3 证据分别见 [CORE_VALIDATION.md](CORE_VALIDATION.md)、[REALTIME_STATE_VALIDATION.md](REALTIME_STATE_VALIDATION.md)、[DESKTOP_VALIDATION.md](DESKTOP_VALIDATION.md)。阶段 4 保存/恢复、设备方案与自动保存及真实重启验收见 [CONFIGURATION_VALIDATION.md](CONFIGURATION_VALIDATION.md)。阶段 4/5 当前收尾证据见 [DIAGNOSTICS_VALIDATION.md](DIAGNOSTICS_VALIDATION.md)：211 单元/组件通过、1 实机注册跳过，3 项选定原生测试通过；不是所有历史真实音频用例的完整回归。跨系统兼容、长期运行及发布仍需阶段 6 证据，不据此认定正式版完成。
 
 ## 不可随意改变的原则
 

@@ -11,36 +11,47 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <StackPanel>
-            <TextBlock x:Name="FocusAnchor" Text="高级选项" FontSize="22" FontWeight="SemiBold" Focusable="True" />
-            <TextBlock Margin="0,4,0,8" Text="按输出设备记住方案，切换默认输出时自动应用。前端和系统的音量调节都会自动保存；原始快照保留。" TextWrapping="Wrap" />
-            <TextBlock Text="{Binding CurrentDeviceName, StringFormat=管理设备：{0}}" Margin="0,0,0,4" TextWrapping="Wrap" />
-            <TextBlock Text="{Binding CurrentProfileName, StringFormat=当前方案：{0}}" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <Border Background="#FFF6DF" CornerRadius="10" Padding="10,6" Margin="0,8,0,0">
-                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{StaticResource WarningBrush}" AutomationProperties.Name="配置操作结果" />
-            </Border>
+            <TextBlock x:Name="FocusAnchor" Text="高级选项" FontSize="24" FontWeight="SemiBold" Focusable="True" />
+            <TextBlock Margin="0,4,0,4" Text="外观、设备方案与音量诊断。更改会自动记住。" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" />
         </StackPanel>
         <StackPanel Grid.Row="1" Margin="0,12,0,10">
-            <Border Style="{StaticResource CardStyle}" Padding="12,10" Margin="0,0,0,12">
-                <StackPanel>
-                    <TextBlock Text="常用偏好" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8" />
-                    <WrapPanel>
-                        <CheckBox Content="登录后启动到托盘" IsChecked="{Binding StartAtLogin}" Margin="0,0,16,4" />
-                        <CheckBox Content="显示不可用设备" IsChecked="{Binding ShowUnavailableDevices}" Margin="0,0,0,4" />
-                    </WrapPanel>
-                </StackPanel>
+            <WrapPanel ItemWidth="{Binding ActualWidth, RelativeSource={RelativeSource Self}, Converter={StaticResource SettingsCardWidth}}">
+                <Border Style="{StaticResource CardStyle}" Margin="0,0,6,12">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,12,0" Visibility="{Binding Appearance, Converter={StaticResource NotNullToVisibility}}">
+                            <TextBlock Text="外观主题" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8" />
+                            <ComboBox ItemsSource="{Binding Appearance.Options}" SelectedValue="{Binding Appearance.Mode}" SelectedValuePath="Mode" DisplayMemberPath="Label" MinWidth="130" AutomationProperties.Name="外观主题" />
+                            <TextBlock Text="{Binding Appearance.Description}" Style="{StaticResource SecondaryTextStyle}" Margin="0,6,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Appearance.Error}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding Appearance.Error, Converter={StaticResource NotNullToVisibility}}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="常用偏好" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8" />
+                            <CheckBox Content="登录后启动到托盘" IsChecked="{Binding StartAtLogin}" Margin="0,0,0,7" />
+                            <CheckBox Content="显示不可用设备" IsChecked="{Binding ShowUnavailableDevices}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource CardStyle}" Margin="6,0,0,12">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="设备方案" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock Text="{Binding CurrentDeviceName}" Style="{StaticResource SecondaryTextStyle}" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                        <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}" DisplayMemberPath="Name" AutomationProperties.Name="已保存方案" />
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button Content="手动恢复快照" Command="{Binding RestoreCommand}" Padding="8,4" MinHeight="28" Margin="0,0,8,0" />
+                            <Button Content="删除方案" Command="{Binding DeleteCommand}" Padding="8,4" MinHeight="28" Foreground="{DynamicResource ErrorBrush}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+            </WrapPanel>
+            <Border CornerRadius="8" Padding="12,8">
+                <Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource SubtleAccentBrush}" /><Style.Triggers><DataTrigger Binding="{Binding HasOperationError}" Value="True"><Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}" /></DataTrigger></Style.Triggers></Style></Border.Style>
+                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="配置操作结果">
+                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" /><Style.Triggers><DataTrigger Binding="{Binding HasOperationError}" Value="True"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                </TextBlock>
             </Border>
-            <WrapPanel>
-                <Button Content="导入" Command="{Binding ImportCommand}" Padding="10,4" Margin="0,0,8,6" />
-                <Button Content="导出" Command="{Binding ExportCommand}" Padding="10,4" Margin="0,0,8,6" />
-                <Button Content="恢复默认" Command="{Binding ResetCommand}" Padding="10,4" Margin="0,0,0,6" />
-            </WrapPanel>
-            <WrapPanel>
-                <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}" DisplayMemberPath="Name"
-                          Width="190" Margin="0,0,8,6" AutomationProperties.Name="已保存方案" />
-                <Button Content="手动恢复快照" Command="{Binding RestoreCommand}" Padding="10,4" Margin="0,0,8,6" />
-                <Button Content="删除方案" Command="{Binding DeleteCommand}" Padding="10,4" Margin="0,0,0,6" />
-            </WrapPanel>
-            <TextBlock Text="{Binding SelectedProfileDetails}" FontSize="12" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" />
         </StackPanel>
         <Grid Grid.Row="2">
             <Grid.RowDefinitions>
@@ -49,13 +60,18 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <DockPanel Margin="0,0,0,6">
-                <TextBlock Text="自动恢复规则" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <DockPanel Margin="0,0,0,10">
+                <WrapPanel DockPanel.Dock="Right">
+                    <Button Content="导入" Command="{Binding ImportCommand}" Padding="9,4" MinHeight="28" Margin="0,0,6,0" />
+                    <Button Content="导出" Command="{Binding ExportCommand}" Padding="9,4" MinHeight="28" Margin="0,0,6,0" />
+                    <Button Content="恢复默认" Command="{Binding ResetCommand}" Padding="9,4" MinHeight="28" Foreground="{DynamicResource ErrorBrush}" ToolTip="重置音量方案及相关偏好；外观主题保持不变。" />
+                </WrapPanel>
+                <TextBlock Text="自动恢复规则" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
             </DockPanel>
             <DataGrid Grid.Row="1" ItemsSource="{Binding Rules}" AutoGenerateColumns="False" CanUserAddRows="False"
                       CanUserDeleteRows="False" CanUserSortColumns="False" HeadersVisibility="Column"
-                      RowHeaderWidth="0" RowHeight="38" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EDF0F7" BorderThickness="0" Background="White" AlternatingRowBackground="#F7F9FE"
-                      Height="240" MinHeight="80" EnableRowVirtualization="True" AutomationProperties.Name="方案恢复规则">
+                      RowHeaderWidth="0" RowHeight="38" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource GridLineBrush}" BorderThickness="0" Background="{DynamicResource CardBackgroundBrush}" AlternatingRowBackground="{DynamicResource SoftSurfaceBrush}"
+                      Height="220" MinHeight="80" EnableRowVirtualization="True" AutomationProperties.Name="方案恢复规则">
                 <DataGrid.Resources>
                     <Style TargetType="TextBlock">
                         <Setter Property="VerticalAlignment" Value="Center" />
@@ -80,11 +96,15 @@
                 </DataGrid.Columns>
             </DataGrid>
             <StackPanel Grid.Row="2" Margin="0,10,0,0">
-                <TextBlock Text="直接在主界面或系统中调节音量即可自动保存。启动、切换设备和新会话出现时自动恢复，不锁定滑块。系统拒绝修改时显示实际值并停止重试，可点击主窗口“刷新”重试。" TextWrapping="Wrap" FontSize="12" />
+                <TextBlock Text="{Binding SelectedProfileDetails}" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" />
+                <WrapPanel Margin="0,10,0,0">
+                    <Button Content="检查音量状态" Command="{Binding InspectCommand}" Padding="10,5" Margin="0,0,8,6" ToolTip="比较保存目标与当前 API 数值，结果见事件记录；数值不代表听感。" />
+                    <Button Content="重新应用当前方案" Command="{Binding ReapplyCommand}" Padding="10,5" Margin="0,0,0,6" ToolTip="仅重新应用当前设备的启用规则，保留目标和原始快照。" />
+                </WrapPanel>
             </StackPanel>
         </Grid>
-        <TextBlock Grid.Row="3" Text="{Binding ConfigurationPath}" TextWrapping="Wrap" Margin="0,10,0,0" FontSize="11"
-                   Foreground="{StaticResource SecondaryTextBrush}" ToolTip="配置文件位置；备份位于同目录" />
+        <TextBlock Grid.Row="3" Text="配置文件位置" Margin="0,6,0,0" FontSize="11"
+                   Foreground="{DynamicResource SecondaryTextBrush}" ToolTip="{Binding ConfigurationPath}" />
     </Grid>
     </ScrollViewer>
 </UserControl>

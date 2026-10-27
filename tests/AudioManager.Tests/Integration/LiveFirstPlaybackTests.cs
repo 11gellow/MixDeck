@@ -12,6 +12,57 @@ namespace AudioManager.Tests.Integration;
 public sealed partial class LiveAudioTests
 {
     [LiveAudioFact]
+    public async Task SameValueAndOffsetRewritesAndManualTargetsUseOnlyIndependentSilentSession()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "MixDeck-reapply-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        using var controller = Create();
+        var device = await RequireDefault(controller);
+        using var child = StartChild(device.Id);
+        AudioSession? session = null;
+        using var monitor = new WindowsAudioStateMonitor(NullLogger<WindowsAudioStateMonitor>.Instance);
+        try
+        {
+            Assert.Equal("READY", await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+            session = await FindNewSession(controller, device.Id, [], (uint)child.Id);
+            await controller.SetSessionVolumeAsync(session.Key, .37f);
+            var before = await controller.GetSessionVolumeAsync(session.Key);
+            await controller.SetSessionVolumeAsync(session.Key, before.Level);
+            Assert.Equal(before, await controller.GetSessionVolumeAsync(session.Key));
+            await controller.SetSessionVolumeAsync(session.Key, .38f);
+            AssertNear(.38f, (await controller.GetSessionVolumeAsync(session.Key)).Level);
+            await controller.SetSessionVolumeAsync(session.Key, before.Level);
+            Assert.Equal(before, await controller.GetSessionVolumeAsync(session.Key));
+            var state = Filter(await monitor.StartAsync(), child.Id);
+            var path = Path.Combine(directory, "settings.json");
+            using var service = new AudioConfigurationService(new JsonConfigurationStore(path), controller);
+            await service.InitializeAsync();
+            await service.SaveSnapshotAsync(state, "重应用实验");
+            await service.HandleStateAsync(state);
+            var persisted = await File.ReadAllTextAsync(path);
+            await controller.SetSessionVolumeAsync(session.Key, .9f);
+            Assert.Contains(await service.InspectAsync(state, device.Id), item => item.State == VolumeDiagnosticState.Differs && item.Actual is { } actual && actual.Level > .89f);
+            AssertNear(.9f, (await controller.GetSessionVolumeAsync(session.Key)).Level);
+            await service.ReapplyTargetsAsync(state, device.Id);
+            Assert.Equal(before, await controller.GetSessionVolumeAsync(session.Key));
+            Assert.Equal(persisted, await File.ReadAllTextAsync(path));
+            output.WriteLine("独立无声会话：0.37 同值重写回读一致，0.37→0.38→0.37 成功且静音不变；检查准确发现实际 0.9/目标 0.37，手动重应用恢复 0.37，配置不变。该测试不能测听感，未验证同值重写能改善听感。");
+        }
+        finally
+        {
+            await monitor.StopAsync();
+            if (session is not null)
+            {
+                await controller.SetSessionVolumeAsync(session.Key, session.Volume.Level);
+                await controller.SetSessionMuteAsync(session.Key, session.Volume.IsMuted);
+                Assert.Equal(session.Volume, await controller.GetSessionVolumeAsync(session.Key));
+            }
+            if (!child.HasExited) { await child.StandardInput.WriteLineAsync("stop"); if (!child.WaitForExit(5000)) { child.Kill(true); child.WaitForExit(5000); } }
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [LiveAudioFact]
     public async Task NativeFirstPlaybackResetRestoresSavedLevelAndLaterExternalControlStillSaves()
     {
         var directory = Path.Combine(Path.GetTempPath(), "MixDeck-first-playback-" + Guid.NewGuid().ToString("N"));

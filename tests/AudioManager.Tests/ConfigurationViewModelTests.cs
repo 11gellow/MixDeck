@@ -332,6 +332,9 @@ public sealed class ConfigurationViewModelTests
                 advanced.Measure(new(820, 700));
                 advanced.Arrange(new(0, 0, 820, 700));
                 advanced.UpdateLayout();
+                var diagnosticButtons = Descendants(advanced).OfType<System.Windows.Controls.Button>().ToArray();
+                Assert.Same(vm.InspectCommand, diagnosticButtons.Single(button => Equals(button.Content, "检查音量状态")).Command);
+                Assert.Same(vm.ReapplyCommand, diagnosticButtons.Single(button => Equals(button.Content, "重新应用当前方案")).Command);
                 var grid = Descendants(advanced).OfType<System.Windows.Controls.DataGrid>().Single();
                 Assert.Equal(6, grid.Columns.Count);
                 Assert.Equal(2, grid.Items.Count);
