@@ -174,7 +174,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             Status = service.LoadResult?.Warning ?? "配置已加载";
             if (service.Current.Settings.StartAtLogin != actualStartup)
             {
-                Status += "；登录启动状态与配置不同，已显示注册表实际值，修改开关时自动同步";
+                Status += "；登录启动状态与配置不同，已显示实际启动注册状态，修改开关时自动同步";
             }
             if (service.LoadResult?.Warning is { } warning) log.Warning(warning, "配置");
         });
