@@ -28,7 +28,11 @@ internal sealed class SystemTrayIcon : IDisposable
         this.show = show;
         this.exit = exit;
         this.logger = logger;
-        image = (Icon)SystemIcons.Application.Clone();
+        using (var resource = System.Windows.Application.GetResourceStream(
+            new Uri("/AudioManager.Desktop;component/Resources/Icons/mixdeck.ico", UriKind.Relative))?.Stream
+            ?? throw new InvalidOperationException("MixDeck 图标资源缺失。"))
+        using (var source = new Icon(resource, Forms.SystemInformation.SmallIconSize))
+            image = (Icon)source.Clone();
         menu = contextMenu ?? new Forms.ContextMenuStrip();
         showItem = new Forms.ToolStripMenuItem("显示主窗口");
         exitItem = new Forms.ToolStripMenuItem("退出");
@@ -44,7 +48,7 @@ internal sealed class SystemTrayIcon : IDisposable
             menu.Opening += OnMenuOpening;
         }
         menu.Items.Add(exitItem);
-        icon = new Forms.NotifyIcon { Text = "Windows Audio Manager · 双击显示，右键退出", Icon = image, ContextMenuStrip = menu };
+        icon = new Forms.NotifyIcon { Text = "MixDeck · 双击显示，右键退出", Icon = image, ContextMenuStrip = menu };
         icon.DoubleClick += OnShow;
         try { icon.Visible = true; }
         catch { Dispose(); throw; }

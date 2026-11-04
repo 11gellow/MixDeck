@@ -282,6 +282,21 @@
         <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style x:Key="MainNavigationStyle" TargetType="TabControl" BasedOn="{StaticResource {x:Type TabControl}}">
+        <Setter Property="ItemContainerStyle"><Setter.Value>
+            <Style TargetType="TabItem">
+                <Setter Property="Width" Value="120"/><Setter Property="Height" Value="40"/>
+                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
+                <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
+                    <Border Background="Transparent" CornerRadius="7" BorderThickness="1" BorderBrush="Transparent" x:Name="TabFocus">
+                        <ContentPresenter x:Name="NavigationLabel" ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.FontWeight="SemiBold" TextElement.Foreground="{DynamicResource SecondaryTextBrush}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="TabFocus" Property="BorderBrush" Value="{DynamicResource PrimaryTextBrush}"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate></Setter.Value></Setter>
+            </Style>
+        </Setter.Value></Setter>
         <Setter Property="Template"><Setter.Value>
             <ControlTemplate TargetType="TabControl">
                 <Grid KeyboardNavigation.TabNavigation="Local">
@@ -294,7 +309,12 @@
                             </Border>
                             <TextBlock Text="MixDeck" FontSize="19" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" VerticalAlignment="Center" />
                         </StackPanel>
-                        <Border Grid.Column="1" Background="{DynamicResource MutedSurfaceBrush}" CornerRadius="9" Padding="2"><TabPanel IsItemsHost="True" /></Border>
+                        <Border Grid.Column="1" Background="{DynamicResource MutedSurfaceBrush}" CornerRadius="10" Padding="3">
+                            <Grid x:Name="PART_NavigationTrack" Background="Transparent" Width="360" Height="40">
+                                <Border x:Name="PART_NavigationIndicator" Background="{DynamicResource AccentBrush}" CornerRadius="7" HorizontalAlignment="Left" IsHitTestVisible="False"/>
+                                <TabPanel IsItemsHost="True"/>
+                            </Grid>
+                        </Border>
                     </Grid>
                     <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Row="1" ContentSource="SelectedContent" />
                 </Grid>

@@ -1,0 +1,18 @@
+<Window x:Class="AudioManager.Desktop.Views.CloseChoiceDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="关闭 MixDeck" Width="460" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        Background="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}"
+        Icon="/AudioManager.Desktop;component/Resources/Icons/mixdeck.ico" PreviewKeyDown="OnKeyDown">
+    <StackPanel Margin="24">
+        <TextBlock Text="如何关闭 MixDeck？" FontSize="21" FontWeight="SemiBold"/>
+        <TextBlock Text="退出程序会停止音量管理；最小化到托盘可继续运行。" TextWrapping="Wrap" Margin="0,8,0,18" Style="{StaticResource SecondaryTextStyle}"/>
+        <CheckBox x:Name="RememberCheckBox" Content="记住我的选择" Margin="0,0,0,18"/>
+        <TextBlock Text="托盘当前不可用，请选择退出程序。" Foreground="{DynamicResource WarningBrush}" Margin="0,0,0,12" x:Name="TrayUnavailableText" Visibility="Collapsed"/>
+        <WrapPanel HorizontalAlignment="Right">
+            <Button Content="退出程序" Click="OnExit" Margin="0,0,8,0"/>
+            <Button x:Name="TrayButton" Content="最小化到托盘" Click="OnTray" IsDefault="True"/>
+        </WrapPanel>
+    </StackPanel>
+</Window>

@@ -8,6 +8,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="MixDeck"
+        Icon="/AudioManager.Desktop;component/Resources/Icons/mixdeck.ico"
         Width="940" Height="740" MinWidth="640" MinHeight="480"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}"
@@ -21,12 +22,7 @@
     </Window.InputBindings>
 
     <DockPanel Margin="24,20,24,14">
-        <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-            <Button DockPanel.Dock="Right" Content="退出程序" Padding="12,4" Click="OnExitClicked" />
-            <TextBlock x:Name="LifetimeText" Text="" VerticalAlignment="Center" TextWrapping="Wrap"
-                       Style="{StaticResource SecondaryTextStyle}" Margin="0,0,12,0" />
-        </DockPanel>
-    <TabControl x:Name="Pages" Style="{StaticResource MainNavigationStyle}" SelectionChanged="OnPageChanged">
+    <views:SlidingTabControl x:Name="Pages" Style="{StaticResource MainNavigationStyle}" SelectionChanged="OnPageChanged">
       <TabItem Header="音量管理">
     <ScrollViewer x:Name="MixerViewport" Margin="0,12,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <Grid MinHeight="480" Height="{Binding ViewportHeight, ElementName=MixerViewport}">
@@ -337,62 +333,13 @@
             </StackPanel>
         </Grid>
 
-        <!-- 操作反馈 -->
-        <Expander Grid.Row="4" Margin="0,10,0,0">
-            <Expander.Header>
-                <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                    <TextBlock Text="事件与操作记录" FontWeight="SemiBold" Margin="0,0,12,0" />
-                    <TextBlock Grid.Column="1" Text="{Binding Log.Latest.TimeText}" Style="{StaticResource SecondaryTextStyle}" Margin="0,0,8,0" />
-                    <TextBlock Grid.Column="2" Text="{Binding Log.Latest.Text}" FontSize="12" TextTrimming="CharacterEllipsis">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Log.Latest.IsError}" Value="True">
-                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
-            </Expander.Header>
-            <Border Style="{StaticResource CardStyle}" Margin="0,6,0,0" Padding="10,6">
-                <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl ItemsSource="{Binding Log.Entries}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:OperationEntry}">
-                                <StackPanel Orientation="Horizontal" Margin="0,2">
-                                    <TextBlock Text="{Binding TimeText}" Width="64" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12" />
-                                    <Border Width="56" Margin="0,0,8,0" CornerRadius="4" Background="{DynamicResource MutedSurfaceBrush}" VerticalAlignment="Top"
-                                            Visibility="{Binding Source, Converter={StaticResource NotNullToVisibility}}">
-                                        <TextBlock Text="{Binding Source}" FontSize="11" HorizontalAlignment="Center"
-                                                   Foreground="{DynamicResource SecondaryTextBrush}" />
-                                    </Border>
-                                    <TextBlock Text="{Binding Text}" FontSize="12" TextWrapping="Wrap">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsError}" Value="True">
-                                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </Border>
-        </Expander>
+
 
     </Grid>
     </ScrollViewer>
       </TabItem>
       <TabItem Header="高级选项"><views:AdvancedOptionsView DataContext="{Binding Configuration}" Loaded="AdvancedOptionsView_Loaded" /></TabItem>
-    </TabControl>
+      <TabItem Header="系统日志"><views:SystemLogView DataContext="{Binding Log}"/></TabItem>
+    </views:SlidingTabControl>
     </DockPanel>
 </Window>

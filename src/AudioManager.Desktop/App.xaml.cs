@@ -21,6 +21,7 @@ public partial class App : Application
     private DesktopLifetime? lifetime;
     private SystemTrayIcon? tray;
     private Action? updateTitleBar;
+    private bool closeDialogOpen;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -39,6 +40,9 @@ public partial class App : Application
             .AddSingleton(_ => new ThemeService(Resources, Dispatcher, WindowsThemePreference.IsDark,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixDeck", "appearance.json")))
             .AddSingleton<AppearanceViewModel>()
+            .AddSingleton(_ => new WindowPreferencesStore(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixDeck", "window.json")))
+            .AddSingleton<WindowBehaviorViewModel>()
             .AddSingleton<ConfigurationViewModel>()
             .AddSingleton(TimeProvider.System)
             .AddSingleton<AppIconProvider>()
@@ -70,9 +74,6 @@ public partial class App : Application
         }
         MainWindow.Closing += OnMainWindowClosing;
         MainWindow.StateChanged += OnWindowStateChanged;
-        var mainView = (MainWindow)MainWindow;
-        mainView.SetTrayAvailable(lifetime.HasTray);
-        mainView.ExitRequested += OnExitRequested;
         SessionEnding += OnSessionEnding;
         if (e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase) && lifetime.HasTray)
             MainWindow.Loaded += HideAfterLoginStartup;
@@ -94,12 +95,32 @@ public partial class App : Application
 
     private void OnMainWindowClosing(object? sender, CancelEventArgs e)
     {
-        if (lifetime is { HasTray: true, IsExiting: false })
+        if (lifetime is not { IsExiting: false } || services is null) return;
+        e.Cancel = true;
+        if (closeDialogOpen) return;
+        var preferences = services.GetRequiredService<WindowPreferencesStore>();
+        var choice = preferences.CloseBehavior;
+        if (choice == WindowCloseBehavior.Ask || choice == WindowCloseBehavior.Tray && !lifetime.HasTray)
         {
-            e.Cancel = true;
-            lifetime.TryHideWindow();
+            closeDialogOpen = true;
+            try
+            {
+                var dialog = new CloseChoiceDialog(lifetime.HasTray) { Owner = MainWindow };
+                var themes = services.GetRequiredService<ThemeService>();
+                dialog.SourceInitialized += (_, _) => WindowsThemePreference.ApplyTitleBar(
+                    new System.Windows.Interop.WindowInteropHelper(dialog).Handle, themes.EffectiveTheme == AppThemeMode.Dark);
+                if (dialog.ShowDialog() != true) return;
+                choice = dialog.Choice;
+                if (dialog.Remember)
+                {
+                    preferences.SetCloseBehavior(choice);
+                    if (preferences.Error is { } error) services.GetRequiredService<OperationLog>().Warning(error, "窗口偏好");
+                }
+            }
+            finally { closeDialogOpen = false; }
         }
-        else if (lifetime is { IsExiting: false }) Dispatcher.BeginInvoke(lifetime.RequestExit);
+        if (choice == WindowCloseBehavior.Tray) lifetime.TryHideWindow();
+        else if (choice == WindowCloseBehavior.Exit) Dispatcher.BeginInvoke(lifetime.RequestExit);
     }
 
     private void OnWindowStateChanged(object? sender, EventArgs e)
@@ -108,7 +129,6 @@ public partial class App : Application
     }
 
     private void OnSessionEnding(object sender, SessionEndingCancelEventArgs e) => lifetime?.PrepareSessionEnd();
-    private void OnExitRequested(object? sender, EventArgs e) => lifetime?.RequestExit();
     private void OnWindowSourceInitialized(object? sender, EventArgs e) => updateTitleBar?.Invoke();
 
     private async Task ShutdownAfterFlushAsync()
@@ -125,7 +145,6 @@ public partial class App : Application
             MainWindow.SourceInitialized -= OnWindowSourceInitialized;
             MainWindow.Closing -= OnMainWindowClosing;
             MainWindow.StateChanged -= OnWindowStateChanged;
-            if (MainWindow is MainWindow mainView) mainView.ExitRequested -= OnExitRequested;
         }
         if (updateTitleBar is not null && services is not null) services.GetRequiredService<ThemeService>().Changed -= updateTitleBar;
         try { tray?.Dispose(); }
