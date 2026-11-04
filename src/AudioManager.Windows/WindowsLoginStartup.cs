@@ -26,6 +26,19 @@ public sealed class WindowsLoginStartup(string executablePath, string valueName 
         if (IsEnabled != enabled) throw new IOException("无法验证登录启动设置。");
     }
 
+    internal Action CaptureRollback()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(runKey, false);
+        var value = key?.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        var kind = value is null ? RegistryValueKind.String : key!.GetValueKind(valueName);
+        return () =>
+        {
+            using var target = Registry.CurrentUser.CreateSubKey(runKey, true);
+            if (value is null) target.DeleteValue(valueName, false);
+            else target.SetValue(valueName, value, kind);
+        };
+    }
+
     public static string BuildCommand(string executablePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);

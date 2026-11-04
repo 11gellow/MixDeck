@@ -1,21 +1,31 @@
-# MixDeck
+# MixDeck v0.1
 
-一个 Windows 音量管理小工具，使用 C#、.NET 10 和 WPF 开发。
+源码状态说明：`v0.1` 标签固定在 `f09fbbe`。当前开发分支在此基础上合入待实机验收的自启动优化候选；下方便携版说明对应原 v0.1，不能将后续源码构建冒充该发布包。启动对比步骤见 `docs/STARTUP_VALIDATION.md`。
 
-目前可以调节系统和各应用的音量、切换静音、切换 Windows 默认输出设备并自动选择对应音量方案，并实时同步音量变化。关闭窗口后会留在托盘运行，可从托盘菜单退出。
+Windows 音量管理小工具，使用 C#、.NET 10 和 WPF 开发。当前版本为首个可用成品，后续按需求和问题维护。
 
-主窗口提供同级“音量管理”和“高级选项”。设备首次使用自动建立方案，已有方案可选择、导入导出和恢复快照；规则与偏好修改后隐式保存，无需保存按钮。数值回车或失焦提交，滑块实时生效、松手后保存。系统拒绝修改时显示实际值和无法修改提示。
+支持系统与应用音量、静音、输出设备切换、按设备记忆并自动恢复音量、托盘运行和登录自启动。界面包含“音量管理”“高级选项”“系统日志”，支持浅色、深色和跟随系统主题。已记忆设置默认收起，收起时自动保存和恢复继续生效。关闭窗口时可选择退出或最小化到托盘，并记住选择；可在高级选项修改。
 
-项目还在开发中，暂无安装包，主要在 Windows 11 上测试。每个输出设备记住各自方案；前端或系统调节都更新当前设备目标，滑块可直接操作。配置默认保存在 `%LOCALAPPDATA%\MixDeck`。启动、切换设备和新会话出现时自动恢复；登录启动默认关闭；真实重启登录验收正在进行。
+## 使用便携版
 
-## 运行
+1. 将 `MixDeck-v0.1-win-x64.zip` **完整解压**到固定目录，无需安装 .NET。
+2. 从资源管理器运行目录内的 `AudioManager.Desktop.exe`（工程内部保留原命名）。
+3. 登录自启动默认关闭，需要时在高级选项开启。开启后请保持目录固定；移动目录后重新关闭、开启自启动。
 
-需要 Windows 和 .NET 10 SDK（当前使用 10.0.204）。在项目根目录执行：
+配置保存在 `%LOCALAPPDATA%\MixDeck`，不在便携目录。更新时先退出程序，将新版解压到原目录，保留 AppData 中的设置；更换版本前可自行备份该配置目录。分发包不包含开发者的配置、音频现场日志或测试素材。
+
+当前主要在 Windows 11 x64 上验证。Windows 10、不同 DPI、更多硬件和长期驻留尚未全面验收；既有滑条 lifecycle 自动化用例存在间歇失败，未声明修复。详情见源码的 `docs/releases/v0.1.md`（便携包内为 `RELEASE-NOTES.md`）。独立分支的自启动优化候选方案未包含在本版。
+
+## 开发与打包
+
+需要 Windows 和 .NET 10 SDK（`global.json` 指定 10.0.204，允许补丁更新）。
 
 ```powershell
 dotnet run --project src/AudioManager.Desktop
+dotnet build AudioManager.sln -c Release --warnaserror
+powershell -NoProfile -File tools/Package-Release.ps1
 ```
 
-工程内部暂时沿用 `AudioManager` 命名。开发进度见 [docs/STATUS.md](docs/STATUS.md)。
+打包脚本要求干净的 Git 工作区，输出到被忽略的 `artifacts/releases/v0.1`，包含 Windows x64 自包含 ZIP、SHA256 校验及来源清单；不覆盖已有输出。程序保留多文件发布，不裁剪 WPF，也不改变 Windows 启动项。
 
-登录自启动验收请从资源管理器直接运行构建生成的 `AudioManager.Desktop.exe`；开发工具的隔离设置可能与正常桌面不同，排查记录见 [配置验收](docs/CONFIGURATION_VALIDATION.md)。
+开发进度见源码的 `docs/STATUS.md`，原开发里程碑编号与成品 v0.1 分开记录。

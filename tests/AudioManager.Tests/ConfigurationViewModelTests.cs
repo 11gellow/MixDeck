@@ -302,7 +302,7 @@ public sealed class ConfigurationViewModelTests
                 window.UpdateLayout();
                 Assert.Equal(main, window.DataContext);
                 var pages = (System.Windows.Controls.TabControl)window.FindName("Pages");
-                Assert.Equal(2, pages.Items.Count);
+                Assert.Equal(3, pages.Items.Count);
                 Assert.Equal("音量管理", ((System.Windows.Controls.TabItem)pages.Items[0]).Header);
                 Assert.Equal("高级选项", ((System.Windows.Controls.TabItem)pages.Items[1]).Header);
                 Assert.IsType<AudioManager.Desktop.Views.AdvancedOptionsView>(((System.Windows.Controls.TabItem)pages.Items[1]).Content);
@@ -332,9 +332,13 @@ public sealed class ConfigurationViewModelTests
                 advanced.Measure(new(820, 700));
                 advanced.Arrange(new(0, 0, 820, 700));
                 advanced.UpdateLayout();
+                var memory = (System.Windows.Controls.Expander)advanced.FindName("MemorySettings");
+                Assert.False(memory.IsExpanded);
+                memory.IsExpanded = true;
+                advanced.UpdateLayout();
                 var diagnosticButtons = Descendants(advanced).OfType<System.Windows.Controls.Button>().ToArray();
                 Assert.Same(vm.InspectCommand, diagnosticButtons.Single(button => Equals(button.Content, "检查音量状态")).Command);
-                Assert.Same(vm.ReapplyCommand, diagnosticButtons.Single(button => Equals(button.Content, "重新应用当前方案")).Command);
+                Assert.Same(vm.ReapplyCommand, diagnosticButtons.Single(button => Equals(button.Content, "重新应用音量设置")).Command);
                 var grid = Descendants(advanced).OfType<System.Windows.Controls.DataGrid>().Single();
                 Assert.Equal(6, grid.Columns.Count);
                 Assert.Equal(2, grid.Items.Count);

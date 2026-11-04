@@ -32,7 +32,8 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public Func<Task>? BeforeApply { get; set; }
     public Task WhenIdleAsync() => pending;
 
-    public ConfigurationViewModel(AudioConfigurationService service, IAudioStateMonitor monitor, ILoginStartup startup, IConfigurationDialogs dialogs, OperationLog log, AppearanceViewModel? appearance = null)
+    public ConfigurationViewModel(AudioConfigurationService service, IAudioStateMonitor monitor, ILoginStartup startup, IConfigurationDialogs dialogs, OperationLog log, AppearanceViewModel? appearance = null,
+        WindowBehaviorViewModel? windowBehavior = null)
     {
         this.service = service;
         this.monitor = monitor;
@@ -40,6 +41,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         this.dialogs = dialogs;
         this.log = log;
         Appearance = appearance;
+        WindowBehavior = windowBehavior;
         InspectCommand = new AsyncRelayCommand(() => RunDeviceActionAsync(async id =>
         {
             var items = await service.InspectAsync(await monitor.GetStateAsync(), id);
@@ -92,6 +94,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
 
     public AudioConfigurationService Service => service;
     public AppearanceViewModel? Appearance { get; }
+    public WindowBehaviorViewModel? WindowBehavior { get; }
     public ObservableCollection<AudioProfile> Profiles { get; } = [];
     public ObservableCollection<RestoreRuleViewModel> Rules { get; } = [];
     public ObservableCollection<VolumeDiagnostic> Diagnostics { get; } = [];
@@ -174,7 +177,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             Status = service.LoadResult?.Warning ?? "配置已加载";
             if (service.Current.Settings.StartAtLogin != actualStartup)
             {
-                Status += "；登录启动状态与配置不同，已显示注册表实际值，修改开关时自动同步";
+                Status += "；登录启动状态与配置不同，已显示实际启动注册状态，修改开关时自动同步";
             }
             if (service.LoadResult?.Warning is { } warning) log.Warning(warning, "配置");
         });
