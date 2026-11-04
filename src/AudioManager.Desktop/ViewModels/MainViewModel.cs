@@ -22,6 +22,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly TimeProvider time;
     private readonly IDefaultAudioOutputController? defaultOutput;
     private readonly AudioEventJournal? audioJournal;
+    private readonly StartupJournal? startupJournal;
+    private Task? initialization;
     private bool journalFailureReported;
     private readonly LatestValueWriter<(string DeviceId, float Level)> masterWriter;
     private readonly SelfEchoGuard masterEchoGuard;
@@ -56,7 +58,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string stateVersionText = "";
 
     public MainViewModel(IAudioController controller, IAudioStateMonitor monitor, AppIconProvider icons, OperationLog log, TimeProvider time,
-        ConfigurationViewModel? configuration = null, IDefaultAudioOutputController? defaultOutput = null, AudioEventJournal? audioJournal = null)
+        ConfigurationViewModel? configuration = null, IDefaultAudioOutputController? defaultOutput = null, AudioEventJournal? audioJournal = null,
+        StartupJournal? startupJournal = null)
     {
         this.controller = controller;
         this.monitor = monitor;
@@ -64,6 +67,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         this.time = time;
         this.defaultOutput = defaultOutput;
         this.audioJournal = audioJournal;
+        this.startupJournal = startupJournal;
         Log = log;
         Configuration = configuration;
         if (Configuration is not null) Configuration.BeforeApply = FinishVolumeEditsAsync;
@@ -239,12 +243,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string ReadIssueSummary => $"{readIssues.Count} 项信息读取不完整";
     public string ReadIssueDetails => string.Join(Environment.NewLine, readIssues.Select(issue => $"{issue.ItemId}：{issue.Message}"));
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync() => initialization ??= InitializeCoreAsync();
+
+    private async Task InitializeCoreAsync()
     {
+        startupJournal?.Mark("initialization-start");
         if (Configuration is not null)
         {
             await Configuration.InitializeAsync();
             ShowUnavailableDevices = Configuration.Service.Current.Settings.ShowUnavailableDevices;
+            startupJournal?.Mark(Configuration.Service.LoadResult is null ? "configuration-init-incomplete" : "configuration-loaded");
         }
         await RefreshCommand.ExecuteAsync();
         if (!disposed && runtimeState is not { IsRunning: true } && !startupRecoveryScheduled)
@@ -341,6 +349,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void OnRestoreReadback(string deviceId, AudioSessionKey? sessionKey, AudioVolume actual)
     {
+        startupJournal?.Mark("first-restore-readback");
         audioJournal?.RecordRestore(deviceId, sessionKey, actual);
         ReportJournalFailure();
         if (loadedDeviceId != deviceId) return;
@@ -366,9 +375,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 SetSync(SyncState.Starting, "正在启动实时监听…");
                 var state = await monitor.StartAsync(lifetime.Token);
+                if (state.IsRunning) startupJournal?.Mark("listener-ready");
                 StartConsuming();
                 ApplyState(state);
                 if (Configuration is not null) await Configuration.Service.HandleStateAsync(state, retry: true);
+                if (state.IsRunning) startupJournal?.Mark("initial-target-pass-complete");
                 var active = state.Devices.Count(device => device.Device.State.HasFlag(AudioDeviceState.Active));
                 Log.Info($"实时监听已启动：{state.Devices.Count} 个输出端点（{active} 个可用），当前设备 {Sessions.Count} 个应用会话", "系统");
             }

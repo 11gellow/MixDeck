@@ -1,4 +1,4 @@
-﻿using AudioManager.Desktop.Services;
+using AudioManager.Desktop.Services;
 using AudioManager.Desktop.ViewModels;
 using AudioManager.Desktop.Views;
 using AudioManager.Windows;
@@ -22,10 +22,51 @@ public partial class App : Application
     private SystemTrayIcon? tray;
     private Action? updateTitleBar;
     private bool closeDialogOpen;
+    private DesktopInstance? instance;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        var executable = Path.ChangeExtension(typeof(App).Assembly.Location, ".exe");
+        var startup = new ScheduledLoginStartup(executable);
+        var startupJournal = new StartupJournal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "MixDeck", "diagnostics", "startup.jsonl"));
+        // 显式一键注册/回退，不初始化音频，不显示主窗口，方便同一构建 A/B 对比。
+        var registrations = e.Args.Where(arg => arg.StartsWith("--startup-register-", StringComparison.Ordinal)).ToArray();
+        if (registrations.Length > 1)
+        {
+            startupJournal.Mark("registration-failed", "只能指定一种启动注册模式。");
+            Shutdown(1);
+            return;
+        }
+        var registration = registrations.SingleOrDefault();
+        if (registration is not null)
+        {
+            try
+            {
+                switch (registration)
+                {
+                    case "--startup-register-run": startup.UseLegacy(); break;
+                    case "--startup-register-task": startup.SetEnabled(true); break;
+                    case "--startup-register-off": startup.SetEnabled(false); break;
+                    default: throw new ArgumentException("未知启动注册模式。");
+                }
+                startupJournal.Mark("registration", startup.RegistrationKind);
+                Shutdown(0);
+            }
+            catch (Exception exception) { startupJournal.Mark("registration-failed", exception.Message); Shutdown(1); }
+            return;
+        }
+        instance = new DesktopInstance();
+        if (!instance.IsPrimary)
+        {
+            if (!e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase)) instance.RequestShow();
+            Shutdown();
+            return;
+        }
+        startupJournal.Mark("app-entry", e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase) ? "tray" : "manual");
+        try { startupJournal.Mark("startup-backend", startup.RegistrationKind); }
+        catch (Exception exception) { startupJournal.Mark("startup-backend-unavailable", exception.Message); }
         services = new ServiceCollection()
             .AddLogging(logging => logging.AddDebug())
             .AddWindowsAudio()
@@ -34,7 +75,8 @@ public partial class App : Application
             .AddSingleton<IAudioController>(provider => provider.GetRequiredService<AudioWriteGuard>())
             .AddSingleton<IConfigurationStore>(_ => new JsonConfigurationStore(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixDeck", "settings.json")))
-            .AddSingleton<ILoginStartup>(_ => new WindowsLoginStartup(Path.ChangeExtension(typeof(App).Assembly.Location, ".exe")))
+            .AddSingleton<ILoginStartup>(startup)
+            .AddSingleton(startupJournal)
             .AddSingleton<AudioConfigurationService>()
             .AddSingleton<IConfigurationDialogs, ConfigurationDialogs>()
             .AddSingleton(_ => new ThemeService(Resources, Dispatcher, WindowsThemePreference.IsDark,
@@ -60,6 +102,7 @@ public partial class App : Application
         themes.Changed += updateTitleBar;
         MainWindow.SourceInitialized += OnWindowSourceInitialized;
         lifetime = new DesktopLifetime(ShowMainWindow, MainWindow.Hide, () => _ = ShutdownAfterFlushAsync());
+        instance.Listen(() => Dispatcher.BeginInvoke(() => { if (lifetime is { IsExiting: false }) lifetime.ShowWindow(); }));
         try
         {
             tray = new SystemTrayIcon(Dispatcher, lifetime.ShowWindow, lifetime.RequestExit,
@@ -67,6 +110,7 @@ public partial class App : Application
                 refreshCommand: services.GetRequiredService<MainViewModel>().RefreshCommand,
                 reapplyCommand: services.GetRequiredService<ConfigurationViewModel>().ReapplyCommand);
             lifetime.EnableTray();
+            startupJournal.Mark("tray-created");
         }
         catch (Exception exception)
         {
@@ -78,6 +122,7 @@ public partial class App : Application
         if (e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase) && lifetime.HasTray)
             MainWindow.Loaded += HideAfterLoginStartup;
         MainWindow.Show();
+        startupJournal.Mark("window-shown");
     }
 
     private void HideAfterLoginStartup(object sender, RoutedEventArgs e)
@@ -148,6 +193,6 @@ public partial class App : Application
         }
         if (updateTitleBar is not null && services is not null) services.GetRequiredService<ThemeService>().Changed -= updateTitleBar;
         try { tray?.Dispose(); }
-        finally { services?.Dispose(); base.OnExit(e); }
+        finally { services?.Dispose(); instance?.Dispose(); base.OnExit(e); }
     }
 }
