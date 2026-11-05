@@ -28,14 +28,14 @@ try {
         if (!(Test-Path -LiteralPath (Join-Path $stage $required))) { throw "缺少自包含运行文件：$required" }
     }
     Copy-Item -LiteralPath README.md -Destination (Join-Path $stage 'README.md')
-    Copy-Item -LiteralPath docs/releases/v0.1.md -Destination (Join-Path $stage 'RELEASE-NOTES.md')
+    Copy-Item -LiteralPath README.md -Destination (Join-Path $stage 'RELEASE-NOTES.md')
     # 从本次还原的包中带上运行库/依赖的许可、声明和包元数据。
     $assets = Get-Content src/AudioManager.Desktop/obj/project.assets.json -Raw | ConvertFrom-Json
     $packageRoots = @($assets.packageFolders.PSObject.Properties.Name)
     $deps = Get-Content (Join-Path $stage 'AudioManager.Desktop.deps.json') -Raw | ConvertFrom-Json
     $notices = Join-Path $stage 'ThirdPartyNotices'
     New-Item -ItemType Directory -Path $notices | Out-Null
-    Copy-Item -LiteralPath docs/third-party/NAudio-LICENSE.txt -Destination $notices
+    Copy-Item -LiteralPath licenses/NAudio-LICENSE.txt -Destination $notices
     foreach ($library in $deps.libraries.PSObject.Properties) {
         if ($library.Value.type -notin @('package', 'runtimepack')) { continue }
         $identity = ($library.Name -replace '^runtimepack\.', '').ToLowerInvariant()

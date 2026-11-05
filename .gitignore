@@ -3,6 +3,13 @@
 [Oo]bj/
 /artifacts/
 
+# 本地 project-memory：规划、状态、任务及现场验收记录留在本机。
+# 用户说明放在 README.md / INSTALL.md，第三方许可放在 licenses/。
+/docs/
+
+# 本地图标候选素材；正式图标保留在 src/AudioManager.Desktop/Resources/Icons。
+/assets/design/icon-concepts/
+
 # 测试结果与覆盖率报告
 [Tt]est[Rr]esults/
 *.trx
