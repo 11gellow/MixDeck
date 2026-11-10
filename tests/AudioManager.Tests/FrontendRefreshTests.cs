@@ -19,6 +19,7 @@ public sealed class FrontendRefreshTests
     [InlineData("closing")]
     [InlineData("motion")]
     [InlineData("realtime")]
+    [InlineData("startup")]
     public async Task RealWpfInteractionUsesFakeAudioAndIsolatedPreferences(string scenario)
     {
         var info = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -77,7 +78,8 @@ public sealed class FrontendRefreshTests
                 app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                 SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
                 app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("pack://application:,,,/AudioManager.Desktop;component/Resources/Styles.xaml") });
-                if (scenario == "navigation") CheckNavigation();
+                if (scenario == "startup") CheckStartupWithoutWindow();
+                else if (scenario == "navigation") CheckNavigation();
                 else if (scenario == "motion") CheckMotion();
                 else if (scenario == "realtime") CheckRealtimeMotion();
                 else CheckClosing();
@@ -89,6 +91,43 @@ public sealed class FrontendRefreshTests
         if (!thread.Join(TimeSpan.FromSeconds(20))) return 1;
         if (failure is not null) { Console.Error.WriteLine(failure); return 1; }
         return 0;
+    }
+
+    private sealed class CountedStartup : AudioManager.Core.Interfaces.ILoginStartup
+    {
+        public int Reads;
+        public bool IsEnabled { get { Interlocked.Increment(ref Reads); return true; } }
+        public void SetEnabled(bool enabled) => throw new InvalidOperationException("Read only fixture");
+    }
+
+    private static void CheckStartupWithoutWindow()
+    {
+        var creation = ConfigurationScenario.CreateAsync(); Pump(creation);
+        using var scenario = creation.GetAwaiter().GetResult();
+        var startup = new CountedStartup();
+        var target = scenario.Raw.Master;
+        var save = scenario.Service.SaveSnapshotAsync(scenario.State(), "startup target"); Pump(save); save.GetAwaiter().GetResult();
+        scenario.Raw.Master = new(.07f, !target.IsMuted);
+        var monitor = new ConfigurationViewModelTests.Monitor(scenario);
+        using var configuration = new ConfigurationViewModel(scenario.Service, monitor, startup, new ConfigurationViewModelTests.FakeDialogs(), new());
+        using var main = new MainViewModel(scenario.Guard, monitor, new(), new(), TimeProvider.System, configuration);
+        main.DeferPresentation();
+        var coordinator = new DesktopStartup(main.InitializeAsync, () =>
+        {
+            Assert.Empty(Application.Current.Windows.Cast<Window>());
+            Assert.True(main.HasMasterVolume);
+            Assert.Equal(target, scenario.Raw.Master);
+            Assert.NotNull(scenario.Service.LoadResult);
+            Assert.Equal(0, startup.Reads);
+            return true;
+        }, () => throw new InvalidOperationException("Tray startup must not construct a window"));
+        var task = coordinator.StartAsync(true, default); Pump(task); task.GetAwaiter().GetResult();
+        Assert.False(configuration.IsStartupStateKnown);
+        var probe = configuration.RefreshStartupStateAsync(); Pump(probe); probe.GetAwaiter().GetResult();
+        Assert.True(configuration.StartAtLogin); Assert.True(configuration.IsStartupStateKnown);
+        var window = new MainWindow(main) { Left = -30000, Top = -30000, ShowInTaskbar = false, ShowActivated = false };
+        try { main.ActivatePresentation(); window.Show(); window.UpdateLayout(); Assert.True(main.HasMasterVolume); }
+        finally { window.Close(); }
     }
 
     private static void CheckNavigation()

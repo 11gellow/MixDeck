@@ -17,7 +17,7 @@
                     </StackPanel>
                     <StackPanel Grid.Column="1">
                         <TextBlock Text="常用偏好" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8"/>
-                        <CheckBox Content="登录后启动到托盘" IsChecked="{Binding StartAtLogin}" Margin="0,0,0,8"/>
+                        <CheckBox Content="登录后启动到托盘" IsChecked="{Binding StartAtLogin}" IsEnabled="{Binding IsStartupStateKnown}" Margin="0,0,0,8"/>
                         <CheckBox Content="显示不可用设备" IsChecked="{Binding ShowUnavailableDevices}"/>
                         <StackPanel Margin="0,16,0,0" Visibility="{Binding WindowBehavior, Converter={StaticResource NotNullToVisibility}}">
                             <TextBlock Text="点击窗口关闭按钮时" Margin="0,0,0,7"/>

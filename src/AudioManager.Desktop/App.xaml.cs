@@ -24,7 +24,9 @@ public partial class App : Application
     private bool closeDialogOpen;
     private DesktopInstance? instance;
 
-    protected override void OnStartup(StartupEventArgs e)
+    private readonly CancellationTokenSource startupLifetime = new();
+
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         var executable = Path.ChangeExtension(typeof(App).Assembly.Location, ".exe");
@@ -49,6 +51,7 @@ public partial class App : Application
                     case "--startup-register-run": startup.UseLegacy(); break;
                     case "--startup-register-task": startup.SetEnabled(true); break;
                     case "--startup-register-off": startup.SetEnabled(false); break;
+                    case "--startup-register-uninstall": startup.RemoveOwnedEntries(); break;
                     default: throw new ArgumentException("未知启动注册模式。");
                 }
                 startupJournal.Mark("registration", startup.RegistrationKind);
@@ -65,8 +68,6 @@ public partial class App : Application
             return;
         }
         startupJournal.Mark("app-entry", e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase) ? "tray" : "manual");
-        try { startupJournal.Mark("startup-backend", startup.RegistrationKind); }
-        catch (Exception exception) { startupJournal.Mark("startup-backend-unavailable", exception.Message); }
         services = new ServiceCollection()
             .AddLogging(logging => logging.AddDebug())
             .AddWindowsAudio()
@@ -85,7 +86,9 @@ public partial class App : Application
             .AddSingleton(_ => new WindowPreferencesStore(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MixDeck", "window.json")))
             .AddSingleton<WindowBehaviorViewModel>()
-            .AddSingleton<ConfigurationViewModel>()
+            .AddSingleton(provider => new ConfigurationViewModel(provider.GetRequiredService<AudioConfigurationService>(),
+                provider.GetRequiredService<IAudioStateMonitor>(), provider.GetRequiredService<ILoginStartup>(),
+                provider.GetRequiredService<IConfigurationDialogs>(), provider.GetRequiredService<OperationLog>()))
             .AddSingleton(TimeProvider.System)
             .AddSingleton<AppIconProvider>()
             .AddSingleton<OperationLog>()
@@ -95,47 +98,87 @@ public partial class App : Application
             .AddSingleton<MainWindow>()
             .BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
 
-        MainWindow = services.GetRequiredService<MainWindow>();
-        var themes = services.GetRequiredService<ThemeService>();
-        updateTitleBar = () => WindowsThemePreference.ApplyTitleBar(new System.Windows.Interop.WindowInteropHelper(MainWindow).Handle,
-            themes.EffectiveTheme == AppThemeMode.Dark);
-        themes.Changed += updateTitleBar;
-        MainWindow.SourceInitialized += OnWindowSourceInitialized;
-        lifetime = new DesktopLifetime(ShowMainWindow, MainWindow.Hide, () => _ = ShutdownAfterFlushAsync());
+        var viewModel = services.GetRequiredService<MainViewModel>();
+        viewModel.DeferPresentation();
+        lifetime = new DesktopLifetime(ShowMainWindow, () => MainWindow?.Hide(), () => _ = ShutdownAfterFlushAsync());
         instance.Listen(() => Dispatcher.BeginInvoke(() => { if (lifetime is { IsExiting: false }) lifetime.ShowWindow(); }));
+        SessionEnding += OnSessionEnding;
+        var coordinator = new DesktopStartup(viewModel.InitializeAsync, TryCreateTray, ShowMainWindow);
         try
         {
-            tray = new SystemTrayIcon(Dispatcher, lifetime.ShowWindow, lifetime.RequestExit,
-                services.GetRequiredService<ILogger<SystemTrayIcon>>(),
-                refreshCommand: services.GetRequiredService<MainViewModel>().RefreshCommand,
-                reapplyCommand: services.GetRequiredService<ConfigurationViewModel>().ReapplyCommand);
-            lifetime.EnableTray();
-            startupJournal.Mark("tray-created");
+            await coordinator.StartAsync(e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase), startupLifetime.Token);
+            if (startupLifetime.IsCancellationRequested) return;
+            var migrated = false;
+            try
+            {
+                migrated = await Task.Run(startup.MigrateEnabledLegacyStartup);
+                if (startupLifetime.IsCancellationRequested) return;
+                if (migrated) startupJournal.Mark("startup-migrated", "run-to-task");
+            }
+            catch (Exception exception)
+            {
+                if (startupLifetime.IsCancellationRequested) return;
+                services.GetRequiredService<OperationLog>().Error("登录启动迁移失败；将显示实际注册状态", exception);
+            }
+            await services.GetRequiredService<ConfigurationViewModel>().RefreshStartupStateAsync(startupLifetime.Token);
+            if (startupLifetime.IsCancellationRequested) return;
+            var kind = await Task.Run(() => startup.RegistrationKind);
+            if (startupLifetime.IsCancellationRequested) return;
+            // 迁移发生在本次进程创建之后，当前样本仍属于 Run，下一次才由 task 启动。
+            startupJournal.Mark("startup-backend", migrated ? "run" : kind);
+        }
+        catch (OperationCanceledException) when (startupLifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            if (startupLifetime.IsCancellationRequested) return;
+            services.GetRequiredService<OperationLog>().Error("启动流程未完成", exception);
+            if (!startupLifetime.IsCancellationRequested) ShowMainWindow();
+        }
+    }
+
+    private bool TryCreateTray()
+    {
+        if (tray is not null) return true;
+        var provider = services!;
+        var desktop = lifetime!;
+        try
+        {
+            tray = new SystemTrayIcon(Dispatcher, desktop.ShowWindow, desktop.RequestExit,
+                provider.GetRequiredService<ILogger<SystemTrayIcon>>(),
+                refreshCommand: provider.GetRequiredService<MainViewModel>().RefreshCommand,
+                reapplyCommand: provider.GetRequiredService<ConfigurationViewModel>().ReapplyCommand);
+            desktop.EnableTray();
+            provider.GetRequiredService<StartupJournal>().Mark("tray-created");
+            return true;
         }
         catch (Exception exception)
         {
-            services.GetRequiredService<OperationLog>().Error("系统托盘初始化失败；关闭主窗口将退出程序", exception);
+            services!.GetRequiredService<OperationLog>().Error("系统托盘暂不可用，将有限重试", exception);
+            return false;
         }
-        MainWindow.Closing += OnMainWindowClosing;
-        MainWindow.StateChanged += OnWindowStateChanged;
-        SessionEnding += OnSessionEnding;
-        if (e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase) && lifetime.HasTray)
-            MainWindow.Loaded += HideAfterLoginStartup;
-        MainWindow.Show();
-        startupJournal.Mark("window-shown");
-    }
-
-    private void HideAfterLoginStartup(object sender, RoutedEventArgs e)
-    {
-        MainWindow.Loaded -= HideAfterLoginStartup;
-        lifetime?.TryHideWindow();
     }
 
     private void ShowMainWindow()
     {
+        if (startupLifetime.IsCancellationRequested || services is null) return;
+        if (MainWindow is null)
+        {
+            services.GetRequiredService<ConfigurationViewModel>().AttachPresentation(
+                services.GetRequiredService<AppearanceViewModel>(), services.GetRequiredService<WindowBehaviorViewModel>());
+            MainWindow = services.GetRequiredService<MainWindow>();
+            var themes = services.GetRequiredService<ThemeService>();
+            updateTitleBar = () => WindowsThemePreference.ApplyTitleBar(new System.Windows.Interop.WindowInteropHelper(MainWindow).Handle,
+                themes.EffectiveTheme == AppThemeMode.Dark);
+            themes.Changed += updateTitleBar;
+            MainWindow.SourceInitialized += OnWindowSourceInitialized;
+            MainWindow.Closing += OnMainWindowClosing;
+            MainWindow.StateChanged += OnWindowStateChanged;
+        }
+        services.GetRequiredService<MainViewModel>().ActivatePresentation();
         MainWindow.Show();
         if (MainWindow.WindowState == WindowState.Minimized) MainWindow.WindowState = WindowState.Normal;
         MainWindow.Activate();
+        services.GetRequiredService<StartupJournal>().Mark("window-shown");
     }
 
     private void OnMainWindowClosing(object? sender, CancelEventArgs e)
@@ -178,12 +221,15 @@ public partial class App : Application
 
     private async Task ShutdownAfterFlushAsync()
     {
+        startupLifetime.Cancel();
         if (MainWindow is MainWindow main) await main.PrepareToLeaveAsync();
+        else if (services is not null) await services.GetRequiredService<MainViewModel>().FlushEditsAsync();
         Shutdown();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        startupLifetime.Cancel();
         SessionEnding -= OnSessionEnding;
         if (MainWindow is not null)
         {
@@ -193,6 +239,6 @@ public partial class App : Application
         }
         if (updateTitleBar is not null && services is not null) services.GetRequiredService<ThemeService>().Changed -= updateTitleBar;
         try { tray?.Dispose(); }
-        finally { services?.Dispose(); instance?.Dispose(); base.OnExit(e); }
+        finally { services?.Dispose(); instance?.Dispose(); startupLifetime.Dispose(); base.OnExit(e); }
     }
 }

@@ -15,6 +15,55 @@ public sealed class StartupTests
     private const string Sid = "S-1-5-21-123";
 
     [Fact]
+    public void DefaultMigrationPreservesOffAndMovesEnabledRunOnlyOnce()
+    {
+        var tasks = new Tasks(); var legacy = new Legacy();
+        var startup = new ScheduledLoginStartup(Exe, Sid, tasks, legacy);
+        Assert.False(startup.MigrateEnabledLegacyStartup());
+        Assert.Null(tasks.Xml);
+        legacy.IsEnabled = true;
+        Assert.True(startup.MigrateEnabledLegacyStartup());
+        Assert.False(legacy.IsEnabled); Assert.True(startup.IsEnabled);
+        var definition = tasks.Xml;
+        Assert.False(startup.MigrateEnabledLegacyStartup());
+        Assert.Equal(definition, tasks.Xml);
+    }
+
+    [Fact]
+    public void DefaultMigrationFailureKeepsLegacyEnabled()
+    {
+        var tasks = new Tasks { FailNextRegister = true }; var legacy = new Legacy { IsEnabled = true };
+        var startup = new ScheduledLoginStartup(Exe, Sid, tasks, legacy);
+        Assert.Throws<IOException>(() => startup.MigrateEnabledLegacyStartup());
+        Assert.True(legacy.IsEnabled); Assert.Null(tasks.Xml);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void UninstallOnlyRemovesEntriesOwnedByCurrentExecutable(bool ownTask)
+    {
+        var tasks = new Tasks { Xml = ScheduledLoginStartup.CreateDefinition(ownTask ? Exe : @"C:\other\MixDeck.exe", Sid) };
+        var original = tasks.Xml;
+        var legacy = new Legacy { IsEnabled = false };
+        new ScheduledLoginStartup(Exe, Sid, tasks, legacy).RemoveOwnedEntries();
+        Assert.Equal(ownTask ? null : original, tasks.Xml);
+        Assert.False(legacy.IsEnabled);
+        legacy.IsEnabled = true;
+        new ScheduledLoginStartup(Exe, Sid, tasks, legacy).RemoveOwnedEntries();
+        Assert.False(legacy.IsEnabled);
+    }
+
+    [Fact]
+    public void UninstallFailureRestoresOwnedRegistration()
+    {
+        var tasks = new Tasks { Xml = ScheduledLoginStartup.CreateDefinition(Exe, Sid) };
+        var legacy = new Legacy { IsEnabled = true, FailNextWrite = true };
+        Assert.Throws<IOException>(() => new ScheduledLoginStartup(Exe, Sid, tasks, legacy).RemoveOwnedEntries());
+        Assert.NotNull(tasks.Xml); Assert.True(legacy.IsEnabled);
+    }
+
+    [Fact]
     public void MigrationRegistersAndVerifiesBeforeRemovingRunAndDisableRemovesBoth()
     {
         var tasks = new Tasks(); var legacy = new Legacy { IsEnabled = true };

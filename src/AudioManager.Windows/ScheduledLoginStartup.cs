@@ -67,6 +67,14 @@ public sealed class ScheduledLoginStartup : ILoginStartup
         }
     }
 
+    /// <summary>只迁移本路径仍启用的旧 Run；关闭、其他路径和已有任务均不主动重启用。</summary>
+    public bool MigrateEnabledLegacyStartup()
+    {
+        if (!legacy.IsEnabled) return false;
+        SetEnabled(true);
+        return true;
+    }
+
     /// <summary>实机 A/B 基线及回退入口；不接触音频配置。</summary>
     public void UseLegacy()
     {
@@ -83,6 +91,28 @@ public sealed class ScheduledLoginStartup : ILoginStartup
         {
             if (previous is not null) tasks.Register(previous);
             rollbackLegacy();
+            throw;
+        }
+    }
+
+    /// <summary>卸载时仅移除当前路径拥有的入口，不触碰其他安装/便携目录。</summary>
+    public void RemoveOwnedEntries()
+    {
+        var previous = tasks.Read();
+        XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+        string? Command(string xml) => XElement.Parse(xml).Element(ns + "Actions")?.Element(ns + "Exec")?.Element(ns + "Command")?.Value;
+        var ownsTask = previous is not null && string.Equals(Command(previous), Command(definition), StringComparison.OrdinalIgnoreCase);
+        var ownsRun = legacy.IsEnabled;
+        var rollback = legacy is WindowsLoginStartup registry ? registry.CaptureRollback() : () => legacy.SetEnabled(ownsRun);
+        try
+        {
+            if (ownsTask) { tasks.Delete(); if (tasks.Read() is not null) throw new IOException("卸载启动任务后回读仍存在。"); }
+            if (ownsRun) legacy.SetEnabled(false);
+        }
+        catch
+        {
+            if (ownsTask) tasks.Register(previous!);
+            if (ownsRun) rollback();
             throw;
         }
     }

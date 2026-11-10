@@ -1,4 +1,7 @@
-; Packaging only: payload must come from the immutable v0.1 archive.
+; Version defaults preserve the legacy v0.1 packaging entrypoint.
+#ifndef AppVersion
+  #define AppVersion "0.1.0"
+#endif
 #ifndef PayloadDir
   #error PayloadDir is required
 #endif
@@ -12,9 +15,9 @@
 [Setup]
 AppId={{A289B309-A01F-4723-BA27-DAE38199CB9E}
 AppName=MixDeck
-AppVersion=0.1.0
-AppVerName=MixDeck v0.1
-VersionInfoVersion=0.1.0.0
+AppVersion={#AppVersion}
+AppVerName=MixDeck v{#AppVersion}
+VersionInfoVersion={#AppVersion}.0
 VersionInfoProductName=MixDeck
 DefaultDirName={localappdata}\Programs\MixDeck
 DefaultGroupName=MixDeck
@@ -56,9 +59,19 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Command: String;
   Expected: String;
+#ifdef StartupAware
+  ResultCode: Integer;
+#endif
 begin
   if CurUninstallStep = usUninstall then
   begin
+#ifdef StartupAware
+    // Only enable this define for builds supporting the audio-free registration command.
+    if not Exec(ExpandConstant('{app}\AudioManager.Desktop.exe'), '--startup-register-uninstall',
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      Log('Unable to start owned-startup cleanup')
+    else if ResultCode <> 0 then Log('Owned-startup cleanup failed; inspect startup diagnostics');
+#endif
     // Never delete another portable/install location's startup registration.
     Expected := '"' + ExpandConstant('{app}\AudioManager.Desktop.exe') + '" --tray';
     if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'MixDeck', Command) then

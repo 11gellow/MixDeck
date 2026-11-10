@@ -1,12 +1,17 @@
 ﻿param(
-    [string]$OutputRoot = 'artifacts/releases/v0.1',
-    [switch]$AllowDirty
+    [string]$OutputRoot = '',
+    [switch]$AllowDirty,
+    [switch]$BuildInstaller
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Push-Location $repo
 try {
+    [xml]$project = Get-Content src/AudioManager.Desktop/AudioManager.Desktop.csproj -Raw
+    $version = [string]$project.Project.PropertyGroup.Version
+    $fileVersion = [string]$project.Project.PropertyGroup.FileVersion
+    if (!$OutputRoot) { $OutputRoot = 'artifacts/releases/v' + $version }
     $commit = git rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { throw '无法读取 Git 提交。' }
     $dirty = [bool](git status --porcelain)
@@ -16,14 +21,14 @@ try {
         throw '输出目录必须位于项目内。'
     }
     if (Test-Path -LiteralPath $root) { throw "输出目录已存在，请指定新目录：$root" }
-    $name = 'MixDeck-v0.1-win-x64'
+    $name = "MixDeck-v$version-win-x64"
     $stage = Join-Path $root $name
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     dotnet publish src/AudioManager.Desktop/AudioManager.Desktop.csproj -c Release -r win-x64 --self-contained true `
         -o $stage --nologo --warnaserror -p:PublishSingleFile=false -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false
     if ($LASTEXITCODE -ne 0) { throw 'Release 发布失败。' }
     $exe = Join-Path $stage 'AudioManager.Desktop.exe'
-    if ((Get-Item -LiteralPath $exe).VersionInfo.FileVersion -ne '0.1.0.0') { throw '程序版本不匹配。' }
+    if ((Get-Item -LiteralPath $exe).VersionInfo.FileVersion -ne $fileVersion) { throw '程序版本不匹配。' }
     foreach ($required in @('coreclr.dll', 'hostfxr.dll', 'hostpolicy.dll', 'PresentationFramework.dll', 'AudioManager.Desktop.dll')) {
         if (!(Test-Path -LiteralPath (Join-Path $stage $required))) { throw "缺少自包含运行文件：$required" }
     }
@@ -49,13 +54,24 @@ try {
         [ordered]@{ path = $_.FullName.Substring($stage.Length + 1); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
     })
     [ordered]@{
-        product = 'MixDeck'; version = '0.1.0'; runtime = 'win-x64'; selfContained = $true
+        product = 'MixDeck'; version = $version; runtime = 'win-x64'; selfContained = $true
         sourceCommit = "$commit"; sourceDirty = $dirty; createdUtc = [DateTime]::UtcNow.ToString('o'); files = $files
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage 'release-manifest.json') -Encoding UTF8
     $zip = Join-Path $root "$name.zip"
     Compress-Archive -LiteralPath $stage -DestinationPath $zip -CompressionLevel Optimal
     $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
     "$hash  $name.zip" | Set-Content -LiteralPath "$zip.sha256" -Encoding ASCII
+    if ($BuildInstaller) {
+        if ([version]$version -lt [version]'0.1.1') { throw '旧版不支持任务卸载清理入口，请使用旧版封装脚本。' }
+        $compiler = Join-Path $env:LOCALAPPDATA 'Programs/Inno Setup 6/ISCC.exe'
+        $icon = (Resolve-Path src/AudioManager.Desktop/Resources/Icons/mixdeck.ico).Path
+        & $compiler /Q /DStartupAware "/DAppVersion=$version" "/DPayloadDir=$stage" "/DOutputDir=$root" "/DAppIcon=$icon" tools/installer/AudioManager.iss
+        if ($LASTEXITCODE -ne 0) { throw '安装程序编译失败。' }
+        Copy-Item -LiteralPath $zip -Destination (Join-Path $root 'AudioManager-Portable.zip')
+        @('AudioManager-Setup.exe', 'AudioManager-Portable.zip') | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash -LiteralPath (Join-Path $root $_) -Algorithm SHA256).Hash, $_
+        } | Set-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt') -Encoding ASCII
+    }
     Write-Output "Package: $zip"
     Write-Output "SHA256: $hash"
 } finally { Pop-Location }

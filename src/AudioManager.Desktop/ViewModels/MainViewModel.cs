@@ -24,6 +24,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly AudioEventJournal? audioJournal;
     private readonly StartupJournal? startupJournal;
     private Task? initialization;
+    private bool presentationEnabled = true;
+    internal void DeferPresentation() => presentationEnabled = false;
+    internal void ActivatePresentation()
+    {
+        presentationEnabled = true;
+        foreach (var session in Sessions) session.Icon = icons.GetIcon(session.ProcessPath);
+    }
     private bool journalFailureReported;
     private readonly LatestValueWriter<(string DeviceId, float Level)> masterWriter;
     private readonly SelfEchoGuard masterEchoGuard;
@@ -250,7 +257,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         startupJournal?.Mark("initialization-start");
         if (Configuration is not null)
         {
-            await Configuration.InitializeAsync();
+            await Configuration.InitializeAsync(readStartupState: false);
             ShowUnavailableDevices = Configuration.Service.Current.Settings.ShowUnavailableDevices;
             startupJournal?.Mark(Configuration.Service.LoadResult is null ? "configuration-init-incomplete" : "configuration-loaded");
         }
@@ -389,6 +396,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 ApplyState(state);
                 if (Configuration is not null) await Configuration.Service.HandleStateAsync(state, retry: true);
                 Log.Info("已重新枚举设备并重试失效的监听", "本软件");
+                if (Configuration is { IsStartupStateKnown: false }) _ = Configuration.RefreshStartupStateAsync(lifetime.Token);
             }
         }
         catch (Exception exception) when (exception is OperationCanceledException || disposed) { }
@@ -548,7 +556,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             else
             {
                 viewModel = new SessionViewModel(session, controller, Log, time);
-                viewModel.Icon = icons.GetIcon(session.ProcessPath);
+                if (presentationEnabled) viewModel.Icon = icons.GetIcon(session.ProcessPath);
                 viewModel.Unavailable += OnSessionUnavailable;
             }
             ordered.Add(viewModel);

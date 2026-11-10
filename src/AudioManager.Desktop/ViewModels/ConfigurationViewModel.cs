@@ -16,6 +16,9 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private readonly IConfigurationDialogs dialogs;
     private readonly OperationLog log;
     private bool initialized;
+    private bool deferStartupReads;
+    private bool isStartupStateKnown = true;
+    public bool IsStartupStateKnown { get => isStartupStateKnown; private set => SetProperty(ref isStartupStateKnown, value); }
     private bool busy;
     private AudioProfile? selectedProfile;
     private string status = "尚未加载配置";
@@ -93,8 +96,15 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     }
 
     public AudioConfigurationService Service => service;
-    public AppearanceViewModel? Appearance { get; }
-    public WindowBehaviorViewModel? WindowBehavior { get; }
+    public AppearanceViewModel? Appearance { get; private set; }
+    public WindowBehaviorViewModel? WindowBehavior { get; private set; }
+    internal void AttachPresentation(AppearanceViewModel appearance, WindowBehaviorViewModel windowBehavior)
+    {
+        Appearance = appearance;
+        WindowBehavior = windowBehavior;
+        OnPropertyChanged(nameof(Appearance));
+        OnPropertyChanged(nameof(WindowBehavior));
+    }
     public ObservableCollection<AudioProfile> Profiles { get; } = [];
     public ObservableCollection<RestoreRuleViewModel> Rules { get; } = [];
     public ObservableCollection<VolumeDiagnostic> Diagnostics { get; } = [];
@@ -164,14 +174,16 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand InspectCommand { get; }
     public AsyncRelayCommand ReapplyCommand { get; }
 
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(bool readStartupState = true)
     {
         if (initialized) return;
+        deferStartupReads = !readStartupState;
+        IsStartupStateKnown = readStartupState;
         await QueueAsync(async () =>
         {
             await service.InitializeAsync();
             initialized = true;
-            var actualStartup = startup.IsEnabled;
+            var actualStartup = deferStartupReads ? service.Current.Settings.StartAtLogin : startup.IsEnabled;
             startAtLogin = actualStartup;
             OnPropertyChanged(nameof(StartAtLogin));
             Status = service.LoadResult?.Warning ?? "配置已加载";
@@ -181,6 +193,19 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             }
             if (service.LoadResult?.Warning is { } warning) log.Warning(warning, "配置");
         });
+    }
+
+    internal async Task RefreshStartupStateAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var actual = await Task.Run(() => startup.IsEnabled);
+            if (cancellationToken.IsCancellationRequested) return;
+            startAtLogin = actual;
+            OnPropertyChanged(nameof(StartAtLogin));
+            IsStartupStateKnown = true;
+        }
+        catch (Exception exception) { log.Error("读取登录启动状态失败", exception); }
     }
 
     private AsyncRelayCommand Command(Func<Task> action, Func<bool>? canExecute = null)
@@ -281,7 +306,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
                 if (index < 0) Rules.Insert(i, rows[i]);
                 else if (index != i) Rules.Move(index, i);
             }
-            startAtLogin = startup.IsEnabled;
+            if (!deferStartupReads) startAtLogin = startup.IsEnabled;
             showUnavailable = service.Current.Settings.ShowUnavailableDevices;
             OnPropertyChanged(nameof(StartAtLogin));
             OnPropertyChanged(nameof(ShowUnavailableDevices));
